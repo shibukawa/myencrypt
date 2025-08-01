@@ -1,0 +1,111 @@
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary, built with `go test -c`
+*.test
+
+# Output of the go coverage tool, specifically when used with LiteIDE
+*.out
+
+# Dependency directories (remove the comment below to include it)
+# vendor/
+
+# Go workspace file
+go.work
+
+# MyEncrypt specific files - binaries
+myencrypt
+myencrypt.exe
+cmd/myencrypt/myencrypt
+cmd/myencrypt/myencrypt.exe
+
+# Test binaries
+test_*
+!test_*.go
+
+# Certificate and key files
+*.pem
+*.key
+*.crt
+*.csr
+*.p12
+*.pfx
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# Configuration files with sensitive data
+config.yaml
+config.yml
+*.env
+
+# Log files
+*.log
+logs/
+server.log
+
+# Temporary files
+tmp/
+temp/
+.tmp/
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Runtime data
+pids
+*.pid
+*.seed
+*.pid.lock
+
+# Coverage directory used by tools like istanbul
+coverage/
+*.cover
+*.coverprofile
+
+# Application data directories
+data/
+storage/
+certs/
+private/
+export/
+
+# Backup files
+*.bak
+*.backup
+*.old
+
+# Archive files
+*.tar
+*.tar.gz
+*.zip
+*.rar
+
+# MyEncrypt application directories
+~/.myencrypt/
+/Users/*/Library/Application Support/myencrypt/
+%APPDATA%/myencrypt/
+%LOCALAPPDATA%/myencrypt/
+
+# Test artifacts
+/var/folders/*/myencrypt-*
+/tmp/myencrypt-*
