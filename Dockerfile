@@ -29,18 +29,28 @@ ARG DATE=unknown
 # source code into the container.
 RUN --mount=type=cache,target=/go/pkg/mod/ \
     --mount=type=bind,target=. \
-    echo "Building MyEncrypt with:" && \
-    echo "  TARGETOS=${TARGETOS}" && \
-    echo "  TARGETARCH=${TARGETARCH}" && \
-    echo "  VERSION=${VERSION}" && \
-    echo "  COMMIT=${COMMIT}" && \
-    echo "  DATE=${DATE}" && \
-    ls -la cmd/myencrypt/ && \
-    CGO_ENABLED=1 GOOS=$TARGETOS GOARCH=$TARGETARCH \
+    set -e && \
+    case "${TARGETOS}-${TARGETARCH}" in \
+        linux-arm64) \
+            echo "Setting up ARM64 cross-compilation..." && \
+            apt-get update -qq && \
+            apt-get install -y -qq gcc-aarch64-linux-gnu libc6-dev-arm64-cross && \
+            export CC=aarch64-linux-gnu-gcc && \
+            export CGO_ENABLED=1 ;; \
+        linux-amd64) \
+            echo "Setting up AMD64 compilation..." && \
+            export CC=gcc && \
+            export CGO_ENABLED=1 ;; \
+        *) \
+            echo "Unsupported platform: ${TARGETOS}-${TARGETARCH}" && \
+            exit 1 ;; \
+    esac && \
+    echo "Building for ${TARGETOS}/${TARGETARCH} with CC=${CC}" && \
+    GOOS=$TARGETOS GOARCH=$TARGETARCH \
     go build -ldflags="-w -s -X main.version=${VERSION} -X main.commit=${COMMIT} -X main.date=${DATE}" \
     -o /bin/myencrypt ./cmd/myencrypt && \
     echo "Build completed successfully" && \
-    ls -la /bin/myencrypt
+    file /bin/myencrypt
 
 ################################################################################
 # Runtime stage using distroless (CGO-enabled)
