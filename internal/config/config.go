@@ -24,28 +24,34 @@ type Config struct {
 	DefaultAllowedDomains []string `yaml:"default_allowed_domains"`
 	AdditionalDomains     []string `yaml:"additional_domains"`
 
-	// File storage configuration
+	// Storage configuration
 	CertStorePath string `yaml:"cert_store_path"`
+	DatabasePath  string `yaml:"database_path"`
 
 	// Service configuration
 	ServiceName        string `yaml:"service_name"`
 	ServiceDisplayName string `yaml:"service_display_name"`
 	ServiceDescription string `yaml:"service_description"`
+	RunMode            string `yaml:"run_mode"`
 
-	// Runtime configuration
-	RunMode         string        `yaml:"run_mode"`
+	// Auto-renewal configuration
 	AutoRenewal     bool          `yaml:"auto_renewal"`
 	RenewalInterval time.Duration `yaml:"renewal_interval"`
+
+	// Internal flags
+	AutoInit bool `yaml:"-"` // Not saved to YAML, used for Docker mode
 }
 
 // DefaultConfig returns a configuration with default values
 func DefaultConfig() *Config {
 	configDir, err := os.UserConfigDir()
 	if err != nil {
-		// Fallback to home directory if UserConfigDir fails
+		// Fallback to home directory
 		homeDir, _ := os.UserHomeDir()
 		configDir = homeDir
 	}
+
+	// Default certificate store path
 	certStorePath := filepath.Join(configDir, "myencrypt")
 
 	return &Config{
@@ -54,7 +60,7 @@ func DefaultConfig() *Config {
 		BindAddress: "0.0.0.0",
 
 		// Certificate defaults
-		IndividualCertTTL: 24 * time.Hour,       // 1 day
+		IndividualCertTTL: 7 * 24 * time.Hour,   // 7 days
 		CACertTTL:         800 * 24 * time.Hour, // 800 days
 
 		// Domain defaults (same as mkcert)
@@ -67,18 +73,22 @@ func DefaultConfig() *Config {
 		},
 		AdditionalDomains: []string{},
 
-		// File storage default
+		// Storage defaults
 		CertStorePath: certStorePath,
+		DatabasePath:  "", // Will be set to CertStorePath/myencrypt.db if empty
 
 		// Service defaults
 		ServiceName:        "myencrypt",
 		ServiceDisplayName: "MyEncrypt ACME Server",
 		ServiceDescription: "Local ACME certificate authority for development",
+		RunMode:            "service",
 
-		// Runtime defaults
-		RunMode:         "service",
+		// Auto-renewal defaults
 		AutoRenewal:     true,
 		RenewalInterval: time.Hour,
+
+		// Internal defaults
+		AutoInit: false,
 	}
 }
 
@@ -86,21 +96,16 @@ func DefaultConfig() *Config {
 func Load() (*Config, error) {
 	cfg := DefaultConfig()
 
-	// Try to load from ~/.myencrypt/config.yaml
 	configPath := filepath.Join(cfg.CertStorePath, "config.yaml")
+	if _, err := os.Stat(configPath); err == nil {
+		data, err := os.ReadFile(configPath)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read config file: %w", err)
+		}
 
-	if _, err := os.Stat(configPath); os.IsNotExist(err) {
-		// Config file doesn't exist, return default configuration
-		return cfg, nil
-	}
-
-	data, err := os.ReadFile(configPath)
-	if err != nil {
-		return nil, err
-	}
-
-	if err := yaml.Unmarshal(data, cfg); err != nil {
-		return nil, err
+		if err := yaml.Unmarshal(data, cfg); err != nil {
+			return nil, fmt.Errorf("failed to parse config file: %w", err)
+		}
 	}
 
 	return cfg, nil
@@ -110,17 +115,20 @@ func Load() (*Config, error) {
 func (c *Config) Save() error {
 	// Ensure directory exists
 	if err := os.MkdirAll(c.CertStorePath, 0755); err != nil {
-		return err
+		return fmt.Errorf("failed to create config directory: %w", err)
 	}
 
 	configPath := filepath.Join(c.CertStorePath, "config.yaml")
-
 	data, err := yaml.Marshal(c)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to marshal config: %w", err)
 	}
 
-	return os.WriteFile(configPath, data, 0644)
+	if err := os.WriteFile(configPath, data, 0644); err != nil {
+		return fmt.Errorf("failed to write config file: %w", err)
+	}
+
+	return nil
 }
 
 // InitializeConfigFile creates a default config.yaml file if it doesn't exist
@@ -129,7 +137,7 @@ func (c *Config) InitializeConfigFile() error {
 
 	// Check if config file already exists
 	if _, err := os.Stat(configPath); err == nil {
-		return nil // File already exists
+		return nil // File already exists, nothing to do
 	}
 
 	// Ensure directory exists
@@ -137,7 +145,7 @@ func (c *Config) InitializeConfigFile() error {
 		return fmt.Errorf("failed to create config directory: %w", err)
 	}
 
-	// Save default configuration
+	// Save the current configuration as the default
 	return c.Save()
 }
 
@@ -149,6 +157,14 @@ func (c *Config) GetConfigFilePath() string {
 // GetCertStorePath returns the certificate storage path
 func (c *Config) GetCertStorePath() string {
 	return c.CertStorePath
+}
+
+// GetDatabasePath returns the database file path
+func (c *Config) GetDatabasePath() string {
+	if c.DatabasePath != "" {
+		return c.DatabasePath
+	}
+	return filepath.Join(c.CertStorePath, "myencrypt.db")
 }
 
 // GetAllowedDomains returns all allowed domains (default + additional)
@@ -174,7 +190,7 @@ func (e ValidationError) Error() string {
 func (c *Config) Validate() error {
 	var errors []ValidationError
 
-	// Validate ports
+	// Validate HTTP port
 	if c.HTTPPort < 1 || c.HTTPPort > 65535 {
 		errors = append(errors, ValidationError{
 			Field:   "http_port",
@@ -209,7 +225,7 @@ func (c *Config) Validate() error {
 		})
 	}
 
-	// Validate certificate storage path
+	// Validate storage paths
 	if strings.TrimSpace(c.CertStorePath) == "" {
 		errors = append(errors, ValidationError{
 			Field:   "cert_store_path",
@@ -218,20 +234,27 @@ func (c *Config) Validate() error {
 		})
 	}
 
-	// Validate that certificate storage path is accessible
-	if err := c.validateCertStorePath(); err != nil {
-		errors = append(errors, ValidationError{
-			Field:   "cert_store_path",
-			Value:   c.CertStorePath,
-			Message: fmt.Sprintf("path validation failed: %v", err),
-		})
-	}
-
 	// Validate service configuration
 	if strings.TrimSpace(c.ServiceName) == "" {
 		errors = append(errors, ValidationError{
 			Field:   "service_name",
 			Value:   c.ServiceName,
+			Message: "cannot be empty",
+		})
+	}
+
+	if strings.TrimSpace(c.ServiceDisplayName) == "" {
+		errors = append(errors, ValidationError{
+			Field:   "service_display_name",
+			Value:   c.ServiceDisplayName,
+			Message: "cannot be empty",
+		})
+	}
+
+	if strings.TrimSpace(c.ServiceDescription) == "" {
+		errors = append(errors, ValidationError{
+			Field:   "service_description",
+			Value:   c.ServiceDescription,
 			Message: "cannot be empty",
 		})
 	}
@@ -280,8 +303,17 @@ func (c *Config) Validate() error {
 		})
 	}
 
-	// Return first error if any
+	// Validate certificate store path accessibility
+	if err := c.validateCertStorePath(); err != nil {
+		errors = append(errors, ValidationError{
+			Field:   "cert_store_path",
+			Value:   c.CertStorePath,
+			Message: err.Error(),
+		})
+	}
+
 	if len(errors) > 0 {
+		// Return the first error for simplicity
 		return errors[0]
 	}
 
@@ -306,11 +338,16 @@ func (c *Config) validateCertStorePath() error {
 		if err := os.MkdirAll(path, 0755); err != nil {
 			return fmt.Errorf("cannot create directory: %w", err)
 		}
-		// Remove the directory we just created for testing
-		os.Remove(path)
 	} else if err != nil {
 		return fmt.Errorf("cannot access path: %w", err)
 	}
+
+	// Check if directory is writable
+	testFile := filepath.Join(path, ".write_test")
+	if err := os.WriteFile(testFile, []byte("test"), 0644); err != nil {
+		return fmt.Errorf("directory is not writable: %w", err)
+	}
+	os.Remove(testFile) // Clean up test file
 
 	return nil
 }
@@ -321,6 +358,7 @@ type CLIOverrides struct {
 	HTTPPort          *int
 	BindAddress       string
 	CertStorePath     string
+	DatabasePath      string
 	LogLevel          string
 	IndividualCertTTL string
 	CACertTTL         string
@@ -334,17 +372,40 @@ func (c *Config) ApplyOverrides(overrides CLIOverrides) error {
 	if overrides.HTTPPort != nil {
 		c.HTTPPort = *overrides.HTTPPort
 	}
-	if strings.TrimSpace(overrides.BindAddress) != "" {
+	if overrides.BindAddress != "" {
 		c.BindAddress = overrides.BindAddress
 	}
-	if strings.TrimSpace(overrides.CertStorePath) != "" {
-		// Expand tilde in path
+	if overrides.CertStorePath != "" {
+		// Handle tilde expansion
 		if strings.HasPrefix(overrides.CertStorePath, "~/") {
-			if homeDir, err := os.UserHomeDir(); err == nil {
-				overrides.CertStorePath = filepath.Join(homeDir, overrides.CertStorePath[2:])
+			homeDir, err := os.UserHomeDir()
+			if err != nil {
+				return fmt.Errorf("failed to get user home directory: %w", err)
 			}
+			if len(overrides.CertStorePath) > 2 {
+				c.CertStorePath = filepath.Join(homeDir, overrides.CertStorePath[2:])
+			} else {
+				c.CertStorePath = homeDir
+			}
+		} else {
+			c.CertStorePath = overrides.CertStorePath
 		}
-		c.CertStorePath = overrides.CertStorePath
+	}
+	if overrides.DatabasePath != "" {
+		// Handle tilde expansion
+		if strings.HasPrefix(overrides.DatabasePath, "~/") {
+			homeDir, err := os.UserHomeDir()
+			if err != nil {
+				return fmt.Errorf("failed to get user home directory: %w", err)
+			}
+			if len(overrides.DatabasePath) > 2 {
+				c.DatabasePath = filepath.Join(homeDir, overrides.DatabasePath[2:])
+			} else {
+				c.DatabasePath = filepath.Join(homeDir, "myencrypt.db")
+			}
+		} else {
+			c.DatabasePath = overrides.DatabasePath
+		}
 	}
 	if strings.TrimSpace(overrides.IndividualCertTTL) != "" {
 		duration, err := time.ParseDuration(overrides.IndividualCertTTL)
@@ -370,9 +431,10 @@ func (c *Config) ApplyOverrides(overrides CLIOverrides) error {
 		}
 		c.RenewalInterval = duration
 	}
-	if strings.TrimSpace(overrides.RunMode) != "" {
+	if overrides.RunMode != "" {
 		c.RunMode = overrides.RunMode
 	}
+
 	return nil
 }
 
@@ -397,21 +459,6 @@ func ValidateOverrides(overrides CLIOverrides) error {
 	if overrides.RenewalInterval != "" {
 		if _, err := time.ParseDuration(overrides.RenewalInterval); err != nil {
 			return fmt.Errorf("invalid renewal interval '%s': %w", overrides.RenewalInterval, err)
-		}
-	}
-
-	// Validate run mode
-	if overrides.RunMode != "" {
-		validModes := []string{"service", "docker", "standalone"}
-		valid := false
-		for _, mode := range validModes {
-			if overrides.RunMode == mode {
-				valid = true
-				break
-			}
-		}
-		if !valid {
-			return fmt.Errorf("invalid run mode '%s', must be one of: %s", overrides.RunMode, strings.Join(validModes, ", "))
 		}
 	}
 

@@ -1,0 +1,119 @@
+run:
+  timeout: 5m
+  issues-exit-code: 1
+  tests: true
+  skip-dirs:
+    - vendor
+    - examples
+  skip-files:
+    - ".*_test.go"
+
+output:
+  format: colored-line-number
+  print-issued-lines: true
+  print-linter-name: true
+
+linters-settings:
+  errcheck:
+    check-type-assertions: true
+    check-blank: true
+  
+  govet:
+    check-shadowing: true
+    enable-all: true
+  
+  gocyclo:
+    min-complexity: 15
+  
+  maligned:
+    suggest-new: true
+  
+  dupl:
+    threshold: 100
+  
+  goconst:
+    min-len: 3
+    min-occurrences: 3
+  
+  misspell:
+    locale: US
+  
+  lll:
+    line-length: 120
+  
+  goimports:
+    local-prefixes: github.com/shibukawayoshiki/myencrypt2
+  
+  gocritic:
+    enabled-tags:
+      - performance
+      - style
+      - experimental
+    disabled-checks:
+      - wrapperFunc
+      - dupImport
+      - ifElseChain
+
+linters:
+  enable:
+    - errcheck
+    - gosimple
+    - govet
+    - ineffassign
+    - staticcheck
+    - typecheck
+    - unused
+    - varcheck
+    - structcheck
+    - deadcode
+    - gocyclo
+    - gofmt
+    - goimports
+    - misspell
+    - lll
+    - goconst
+    - gocritic
+    - gci
+    - godot
+    - godox
+    - gofumpt
+    - gosec
+    - nolintlint
+    - revive
+    - unconvert
+    - unparam
+    - whitespace
+  
+  disable:
+    - maligned  # deprecated
+    - interfacer  # deprecated
+    - scopelint  # deprecated
+
+issues:
+  exclude-rules:
+    # Exclude some linters from running on tests files
+    - path: _test\.go
+      linters:
+        - gocyclo
+        - errcheck
+        - dupl
+        - gosec
+    
+    # Exclude known linters from partially hard-to-fix issues
+    - linters:
+        - lll
+      source: "^//go:generate "
+    
+    # Exclude shadow checking on err variables
+    - linters:
+        - govet
+      text: "shadow: declaration of \"err\""
+    
+    # Exclude gosec for test files
+    - path: _test\.go
+      linters:
+        - gosec
+  
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  new: false

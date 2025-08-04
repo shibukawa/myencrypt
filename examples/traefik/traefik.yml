@@ -1,0 +1,66 @@
+# Traefik static configuration
+global:
+  checkNewVersion: false
+  sendAnonymousUsage: false
+
+# API and dashboard
+api:
+  dashboard: true
+  debug: true
+  insecure: true  # Enable insecure mode for debugging
+
+# Entry points
+entryPoints:
+  web:
+    address: ":80"
+  websecure:
+    address: ":443"
+    http:
+      tls:
+        options: default
+
+# Certificate resolvers
+certificatesResolvers:
+  myencrypt:
+    acme:
+      # Use MyEncrypt ACME server
+      caServer: http://myencrypt:80/acme/directory
+      email: admin@example.com
+      storage: /data/acme.json
+      # Use HTTP-01 challenge (same as Certbot)
+      httpChallenge:
+        entryPoint: web
+      # Enable key type for debugging
+      keyType: EC256
+
+# Providers
+providers:
+  # Docker provider
+  docker:
+    endpoint: "unix:///var/run/docker.sock"
+    exposedByDefault: false
+    network: myencrypt_default
+  
+  # File provider for additional configuration
+  file:
+    filename: /etc/traefik/dynamic.yml
+    watch: true
+
+# Logging
+log:
+  level: INFO
+
+# Access logs
+accessLog: {}
+
+# TLS configuration
+tls:
+  options:
+    default:
+      minVersion: "VersionTLS12"
+
+# Metrics
+metrics:
+  prometheus:
+    addEntryPointsLabels: true
+    addServicesLabels: true

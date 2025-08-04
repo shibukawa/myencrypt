@@ -86,18 +86,14 @@ type Authorization struct {
 	UpdatedAt  time.Time     `json:"updatedAt"`
 }
 
-// Challenge represents an ACME challenge
+// Challenge represents an ACME challenge (RFC 8555 Section 7.1.4)
 type Challenge struct {
-	ID     string `json:"id"`
-	Type   string `json:"type"`
-	URL    string `json:"url"`
-	Status string `json:"status"`
-	Token  string `json:"token"`
-	KeyAuthorization string `json:"keyAuthorization,omitempty"`
-	Validated *time.Time `json:"validated,omitempty"`
+	Type      string          `json:"type"`
+	URL       string          `json:"url"`
+	Status    string          `json:"status"`
+	Token     string          `json:"token"`
+	Validated *time.Time      `json:"validated,omitempty"`
 	Error     *ProblemDetails `json:"error,omitempty"`
-	CreatedAt time.Time `json:"createdAt"`
-	UpdatedAt time.Time `json:"updatedAt"`
 }
 
 // ProblemDetails represents an RFC 7807 problem details object
@@ -214,18 +210,19 @@ type RevocationRequest struct {
 
 // JWS represents a JSON Web Signature
 type JWS struct {
-	Protected string `json:"protected"`
-	Payload   string `json:"payload"`
-	Signature string `json:"signature"`
+	Protected string     `json:"protected"`
+	Payload   string     `json:"payload"`
+	Signature string     `json:"signature"`
+	Header    *JWSHeader `json:"-"` // Parsed header, not part of JSON
 }
 
 // JWSHeader represents a JWS header
 type JWSHeader struct {
-	Alg   string      `json:"alg"`
-	Nonce string      `json:"nonce,omitempty"`
-	URL   string      `json:"url,omitempty"`
-	JWK   *JSONWebKey `json:"jwk,omitempty"`
-	Kid   string      `json:"kid,omitempty"`
+	Alg   string       `json:"alg"`
+	Nonce string       `json:"nonce,omitempty"`
+	URL   string       `json:"url,omitempty"`
+	JWK   *JSONWebKey  `json:"jwk,omitempty"`
+	Kid   string       `json:"kid,omitempty"`
 }
 
 // NonceResponse represents a nonce response
@@ -250,7 +247,11 @@ type ServerOrder struct {
 // ServerChallenge represents a challenge stored on the server
 type ServerChallenge struct {
 	Challenge
-	AuthzID string `json:"authzId"`
+	ID               string    `json:"id"`               // Internal ID
+	AuthzID          string    `json:"authzId"`          // Authorization ID
+	KeyAuthorization string    `json:"-"`                // Not sent to client
+	CreatedAt        time.Time `json:"createdAt"`
+	UpdatedAt        time.Time `json:"updatedAt"`
 }
 
 // ServerAuthorization represents an authorization stored on the server

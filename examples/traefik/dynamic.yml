@@ -1,0 +1,56 @@
+# Traefik dynamic configuration
+
+# HTTP to HTTPS redirect middleware
+http:
+  middlewares:
+    https-redirect:
+      redirectScheme:
+        scheme: https
+        permanent: true
+    
+    # Security headers middleware
+    security-headers:
+      headers:
+        customRequestHeaders:
+          X-Served-By: "Traefik with MyEncrypt"
+          X-Protocol: "HTTPS"
+        customResponseHeaders:
+          X-Frame-Options: "DENY"
+          X-Content-Type-Options: "nosniff"
+          X-XSS-Protection: "1; mode=block"
+    
+    # CORS middleware for API
+    cors-headers:
+      headers:
+        accessControlAllowMethods:
+          - GET
+          - POST
+          - PUT
+          - DELETE
+        accessControlAllowOriginList:
+          - "https://app1.local"
+          - "https://app2.local"
+        accessControlMaxAge: 100
+        addVaryHeader: true
+
+  # Global HTTP to HTTPS redirect
+  routers:
+    http-catchall:
+      rule: "hostregexp(`{host:.+}`)"
+      entrypoints:
+        - web
+      middlewares:
+        - https-redirect
+      service: api@internal
+
+# TLS configuration
+tls:
+  options:
+    default:
+      sslProtocols:
+        - "TLSv1.2"
+        - "TLSv1.3"
+      cipherSuites:
+        - "TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384"
+        - "TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305"
+        - "TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256"

@@ -2,6 +2,7 @@ package certmanager
 
 import (
 	"crypto/ecdsa"
+	"crypto/x509"
 
 	"github.com/shibukawayoshiki/myencrypt2/internal/config"
 	"github.com/shibukawayoshiki/myencrypt2/internal/logger"
@@ -19,8 +20,14 @@ type Manager interface {
 	
 	// Individual certificate generation
 	GenerateCertificate(domain string) (*Certificate, error)
+	GenerateCertificateFromCSR(csr *x509.CertificateRequest) (*Certificate, error)
 	ValidateCertificate(cert *Certificate) error
 	GetCertificateChain(cert *Certificate) ([]byte, error)
+	
+	// Certificate listing and management
+	ListCertificates() (map[string]*Certificate, error)
+	GetCertificate(domain string) (*Certificate, error)
+	DeleteCertificate(domain string) error
 	GetCertificateInfo(cert *Certificate) map[string]interface{}
 	
 	// Domain management
@@ -120,12 +127,30 @@ func (m *CombinedManager) GenerateCertificate(domain string) (*Certificate, erro
 	return m.certManager.GenerateCertificate(domain)
 }
 
+func (m *CombinedManager) GenerateCertificateFromCSR(csr *x509.CertificateRequest) (*Certificate, error) {
+	return m.certManager.GenerateCertificateFromCSR(csr)
+}
+
 func (m *CombinedManager) ValidateCertificate(cert *Certificate) error {
 	return m.certManager.ValidateCertificate(cert)
 }
 
 func (m *CombinedManager) GetCertificateChain(cert *Certificate) ([]byte, error) {
 	return m.certManager.GetCertificateChain(cert)
+}
+
+// Certificate listing and management methods
+
+func (m *CombinedManager) ListCertificates() (map[string]*Certificate, error) {
+	return m.certManager.ListCertificates()
+}
+
+func (m *CombinedManager) GetCertificate(domain string) (*Certificate, error) {
+	return m.certManager.GetCertificate(domain)
+}
+
+func (m *CombinedManager) DeleteCertificate(domain string) error {
+	return m.certManager.DeleteCertificate(domain)
 }
 
 func (m *CombinedManager) GetCertificateInfo(cert *Certificate) map[string]interface{} {

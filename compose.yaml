@@ -1,0 +1,136 @@
+services:
+  # MyEncrypt ACME Server
+  myencrypt:
+    build: .
+    ports:
+      - "14000:80"  # Host port 14000 maps to container port 80
+    environment:
+      - MYENCRYPT_EXPOSE_PORT=14000  # Required: Host-accessible port
+      - MYENCRYPT_PROJECT_NAME=myencrypt  # Required: Project name for Docker mode
+      - MYENCRYPT_INDIVIDUAL_CERT_TTL=168h  # 7 days (7 * 24h)
+      - MYENCRYPT_CA_CERT_TTL=19200h
+      - MYENCRYPT_ALLOWED_DOMAINS=localhost,*.localhost,*.test,*.example,*.invalid,app.localhost,api.localhost,traefik.localhost,caddy.localhost,autocert.localhost,nginx.localhost
+      - MYENCRYPT_CERT_STORE_PATH=/data
+      - MYENCRYPT_DATABASE_PATH=/data/myencrypt.db
+      - MYENCRYPT_LOG_LEVEL=debug  # Enable debug logging
+    volumes:
+      - myencrypt_data:/data
+    restart: unless-stopped
+
+  # Demo App 1: Autocert (direct HTTPS)
+  autocert.localhost:
+    build:
+      context: .
+      dockerfile: ./examples/autocert-app/Dockerfile
+    ports:
+      - "8443:443"  # Map host port 8443 to container port 443 for TLS-ALPN challenge
+    environment:
+      - DOMAIN=autocert.localhost
+      - PORT=443    # Use standard HTTPS port for TLS-ALPN challenge
+      - ACME_DIRECTORY_URL=http://myencrypt:80/acme/directory
+      - CACHE_DIR=/tmp/autocert-cache
+    depends_on:
+      - myencrypt
+    restart: unless-stopped
+    volumes:
+      - autocert_cache:/tmp/autocert-cache
+
+  # Shared Simple HTTP App (used by both Caddy and Traefik)
+  simple-http-app:
+    build:
+      context: ./examples/simple-http-app
+      dockerfile: Dockerfile
+    environment:
+      - APP_NAME=Shared HTTP App
+      - PORT=8080
+    restart: unless-stopped
+    labels:
+      # Traefik labels for this shared app
+      - "traefik.enable=true"
+      - "traefik.http.routers.app.rule=Host(`app.localhost`)"
+      - "traefik.http.routers.app.entrypoints=websecure"
+      - "traefik.http.routers.app.tls.certresolver=myencrypt"
+      - "traefik.http.routers.app.middlewares=security-headers"
+      - "traefik.http.services.app.loadbalancer.server.port=8080"
+
+  # Caddy Reverse Proxy
+  caddy:
+    image: caddy:2-alpine
+    ports:
+      - "8083:80"    # HTTP (different port to avoid system port conflict)
+      - "8445:443"   # HTTPS (different port to avoid system port conflict)
+      - "8084:8080"  # Health check port
+    volumes:
+      - ./examples/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - myencrypt
+      - simple-http-app
+    restart: unless-stopped
+
+  # Traefik Reverse Proxy (alternative to Caddy)
+  traefik.localhost:
+    image: traefik:v3.0
+    ports:
+      - "8081:80"    # HTTP (different port to avoid conflict with Caddy)
+      - "8444:443"   # HTTPS (different port to avoid conflict with Caddy)
+      - "8082:8080"  # Dashboard
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./examples/traefik/traefik.yml:/etc/traefik/traefik.yml:ro
+      - ./examples/traefik/dynamic.yml:/etc/traefik/dynamic.yml:ro
+      - traefik_data:/data
+    depends_on:
+      - myencrypt
+      - simple-http-app
+    networks:
+      default:
+        aliases:
+          - app.localhost  # Alias for the proxied app
+    restart: unless-stopped
+    labels:
+      # Traefik dashboard
+      - "traefik.enable=true"
+      - "traefik.http.routers.dashboard.rule=Host(`traefik.localhost`)"
+      - "traefik.http.routers.dashboard.entrypoints=websecure"
+      - "traefik.http.routers.dashboard.tls.certresolver=myencrypt"
+      - "traefik.http.routers.dashboard.service=api@internal"
+
+  # Certbot + Nginx Example
+  nginx.localhost:
+    build:
+      context: ./examples/certbot-nginx
+      dockerfile: Dockerfile
+    ports:
+      - "8085:80"    # HTTP (different port to avoid conflicts)
+      - "8446:443"   # HTTPS (different port to avoid conflicts)
+    volumes:
+      - certbot_data:/etc/letsencrypt
+      - certbot_www:/var/www/certbot
+      - nginx_logs:/var/log/nginx
+    depends_on:
+      - myencrypt
+      - simple-http-app
+    restart: unless-stopped
+    networks:
+      default:
+        aliases:
+          - nginx.localhost  # Ensure domain resolution within Docker network
+    labels:
+      # Traefik labels (if needed for integration)
+      - "traefik.enable=false"  # Disable Traefik for this service
+
+networks:
+  default:
+    name: myencrypt_demo_network
+
+volumes:
+  myencrypt_data:
+  autocert_cache:
+  caddy_data:
+  caddy_config:
+  traefik_data:
+  certbot_data:
+  certbot_www:
+  nginx_logs:

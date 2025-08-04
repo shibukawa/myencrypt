@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/shibukawa/incontainer"
 	"github.com/shibukawayoshiki/myencrypt2/internal/certmanager"
 	"github.com/shibukawayoshiki/myencrypt2/internal/config"
 	initialize "github.com/shibukawayoshiki/myencrypt2/internal/init"
@@ -22,6 +23,7 @@ type CLI struct {
 	HTTPPort      int    `help:"HTTP server port" default:"14000" env:"MYENCRYPT_HTTP_PORT" group:"server" range:"1-65535"`
 	BindAddress   string `help:"Server bind address" default:"0.0.0.0" env:"MYENCRYPT_BIND_ADDRESS" group:"server"`
 	CertStorePath string `help:"Certificate storage path" default:"" env:"MYENCRYPT_CERT_STORE_PATH" group:"storage"`
+	DatabasePath  string `help:"SQLite database file path" default:"" env:"MYENCRYPT_DATABASE_PATH" group:"storage"`
 	LogLevel      string `help:"Log level (debug, info, error)" default:"info" enum:"debug,info,error" env:"MYENCRYPT_LOG_LEVEL" group:"logging"`
 
 	// Additional configuration options
@@ -33,7 +35,7 @@ type CLI struct {
 
 	// Commands
 	Init    InitCmd    `cmd:"" help:"Initialize CA certificate and generate installation scripts"`
-	Run     RunCmd     `cmd:"" help:"Run myencrypt server in foreground (for development/testing)"`
+	Run     RunCmd     `cmd:"" help:"Run myencrypt server"`
 	Test    TestCmd    `cmd:"" help:"Test certificate generation (for development)"`
 	Service ServiceCmd `cmd:"" help:"Manage myencrypt as an OS service"`
 	Domain  DomainCmd  `cmd:"" help:"Manage allowed domains"`
@@ -46,9 +48,10 @@ type InitCmd struct {
 	Force bool `help:"Force regeneration of CA certificate even if it exists" short:"f"`
 }
 
-// RunCmd handles running the server in foreground
+// RunCmd handles running the server
 type RunCmd struct {
-	DryRun bool `help:"Check configuration and exit without starting server" short:"n"`
+	DryRun    bool `help:"Check configuration and exit without starting server" short:"n"`
+	Container bool `help:"Use container mode (environment variables only, auto-detected in Docker)" default:"false"`
 }
 
 // TestCmd handles certificate generation testing
@@ -146,6 +149,7 @@ func main() {
 		ConfigFile:        cli.ConfigFile,
 		BindAddress:       cli.BindAddress,
 		CertStorePath:     cli.CertStorePath,
+		DatabasePath:      cli.DatabasePath,
 		LogLevel:          cli.LogLevel,
 		IndividualCertTTL: cli.IndividualCertTTL,
 		CACertTTL:         cli.CACertTTL,
@@ -200,7 +204,13 @@ func main() {
 	case "init":
 		err = handleInitCommand(cfg, log, cli.Init.Force)
 	case "run":
-		err = handleRunCommand(cfg, log, cli.Run.DryRun)
+		// Auto-detect container environment if not explicitly set
+		containerMode := cli.Run.Container
+		if !containerMode && incontainer.IsInContainer() {
+			containerMode = true
+			log.Info("Container environment detected, enabling container mode automatically")
+		}
+		err = handleRunCommand(cfg, log, cli.Run.DryRun, containerMode)
 	case "test <domain>":
 		err = handleTestCommand(cfg, log, cli.Test.Domain)
 	case "service install":
@@ -258,26 +268,66 @@ func handleInitCommand(cfg *config.Config, log *logger.Logger, force bool) error
 	return nil
 }
 
-// handleRunCommand handles running the server in foreground
-func handleRunCommand(cfg *config.Config, log *logger.Logger, dryRun bool) error {
+// handleRunCommand handles running the server
+func handleRunCommand(cfg *config.Config, log *logger.Logger, dryRun bool, containerMode bool) error {
+	var finalCfg *config.Config
+	var err error
+
+	if containerMode {
+		// Use Docker-specific configuration (environment variables only with validation)
+		log.Info("Using container mode configuration (environment variables only)")
+		finalCfg, err = config.LoadFromEnvForDocker()
+		if err != nil {
+			return fmt.Errorf("failed to load Docker configuration: %w", err)
+		}
+		
+		// Auto-initialize if needed in Docker mode
+		if finalCfg.AutoInit {
+			log.Info("Auto-initialization enabled in Docker mode")
+			initCmd := initialize.New(finalCfg, log)
+			if err := initCmd.Execute(false); err != nil {
+				log.Warn("Auto-initialization failed, continuing anyway", "error", err)
+			} else {
+				log.Info("Auto-initialization completed successfully")
+			}
+		}
+	} else {
+		// Use normal configuration loading (development mode)
+		log.Info("Using development mode configuration (config files + environment)")
+		finalCfg, err = config.LoadWithEnvOverrides()
+		if err != nil {
+			return fmt.Errorf("failed to load configuration: %w", err)
+		}
+	}
+
 	if dryRun {
-		fmt.Println("MyEncrypt Configuration Check")
+		fmt.Println("🧪 MyEncrypt Configuration Check")
 		fmt.Println("============================")
-		fmt.Printf("HTTP Server: http://%s:%d\n", cfg.BindAddress, cfg.HTTPPort)
-		fmt.Printf("Certificate Store: %s\n", cfg.GetCertStorePath())
-		fmt.Printf("Individual Cert TTL: %s\n", cfg.IndividualCertTTL)
-		fmt.Printf("CA Cert TTL: %s\n", cfg.CACertTTL)
-		fmt.Printf("Auto Renewal: %t\n", cfg.AutoRenewal)
+		fmt.Printf("HTTP Server: http://%s:%d\n", finalCfg.BindAddress, finalCfg.HTTPPort)
+		if containerMode {
+			exposePort := os.Getenv("MYENCRYPT_EXPOSE_PORT")
+			fmt.Printf("Docker Expose Port: %s (host access)\n", exposePort)
+			fmt.Printf("Internal Port: %d (container internal)\n", finalCfg.HTTPPort)
+		}
+		fmt.Printf("Certificate Store: %s\n", finalCfg.GetCertStorePath())
+		fmt.Printf("Database Path: %s\n", finalCfg.GetDatabasePath())
+		fmt.Printf("Individual Cert TTL: %s\n", finalCfg.IndividualCertTTL)
+		fmt.Printf("CA Cert TTL: %s\n", finalCfg.CACertTTL)
+		fmt.Printf("Auto Renewal: %t\n", finalCfg.AutoRenewal)
+		fmt.Printf("Container Mode: %t\n", containerMode)
+		if containerMode {
+			fmt.Printf("Container Detection: %t\n", incontainer.IsInContainer())
+		}
 		fmt.Println()
 		
 		// Validate configuration
-		if err := cfg.Validate(); err != nil {
+		if err := finalCfg.Validate(); err != nil {
 			fmt.Printf("❌ Configuration validation failed: %v\n", err)
 			return err
 		}
 		
 		// Check certificate manager initialization
-		certMgr := certmanager.New(cfg, log)
+		certMgr := certmanager.New(finalCfg, log)
 		if err := certMgr.LoadAllowedDomains(); err != nil {
 			fmt.Printf("❌ Failed to load allowed domains: %v\n", err)
 			return err
@@ -301,18 +351,53 @@ func handleRunCommand(cfg *config.Config, log *logger.Logger, dryRun bool) error
 	}
 
 	fmt.Printf("Starting MyEncrypt ACME Server...\n")
-	fmt.Printf("HTTP Server: http://%s:%d\n", cfg.BindAddress, cfg.HTTPPort)
-	fmt.Printf("Certificate Store: %s\n", cfg.GetCertStorePath())
+	fmt.Printf("HTTP Server: http://%s:%d\n", finalCfg.BindAddress, finalCfg.HTTPPort)
+	if containerMode {
+		exposePort := os.Getenv("MYENCRYPT_EXPOSE_PORT")
+		fmt.Printf("Docker Expose Port: %s (host access)\n", exposePort)
+		fmt.Printf("Internal Port: %d (container internal)\n", finalCfg.HTTPPort)
+		fmt.Printf("Container Access: http://myencrypt (within Docker network)\n")
+		fmt.Println()
+		fmt.Println("📋 CA Certificate Installation Guide:")
+		fmt.Println("=====================================")
+		fmt.Printf("Quick install (one-liner):\n")
+		fmt.Printf("   # macOS/Linux:\n")
+		fmt.Printf("   curl -sSL http://localhost:%s/download/install.sh | bash\n", exposePort)
+		fmt.Printf("   \n")
+		fmt.Printf("   # Windows (PowerShell):\n")
+		fmt.Printf("   # Download and run separately:\n")
+		fmt.Printf("   curl http://localhost:%s/download/install.ps1 -o install.ps1\n", exposePort)
+		fmt.Printf("   .\\install.ps1\n")
+		fmt.Printf("   \n")
+		fmt.Printf("More options and manual install: http://localhost:%s/download\n", exposePort)
+		fmt.Println()
+	}
+	fmt.Printf("Certificate Store: %s\n", finalCfg.GetCertStorePath())
+	fmt.Printf("Database Path: %s\n", finalCfg.GetDatabasePath())
+	if containerMode {
+		fmt.Println("Mode: Container (environment variables only)")
+		if incontainer.IsInContainer() {
+			fmt.Println("Container Environment: Detected automatically")
+		} else {
+			fmt.Println("Container Environment: Forced via --container flag")
+		}
+	} else {
+		fmt.Println("Mode: Development (config files + environment)")
+	}
 	fmt.Println()
 	fmt.Println("Press Ctrl+C to stop the server")
 	fmt.Println()
 
-	log.Info("Starting MyEncrypt server in foreground mode",
-		"http_port", cfg.HTTPPort,
-		"cert_store_path", cfg.GetCertStorePath())
+	log.Info("Starting MyEncrypt server",
+		"http_port", finalCfg.HTTPPort,
+		"bind_address", finalCfg.BindAddress,
+		"cert_store_path", finalCfg.GetCertStorePath(),
+		"database_path", finalCfg.GetDatabasePath(),
+		"container_mode", containerMode,
+		"container_detected", incontainer.IsInContainer())
 
 	// Create a service manager and run it directly
-	serviceManager, err := service.New(cfg, log)
+	serviceManager, err := service.New(finalCfg, log)
 	if err != nil {
 		return fmt.Errorf("failed to create service manager: %w", err)
 	}
@@ -491,10 +576,19 @@ func handleConfigHelpCommand() error {
 
 // handleVersionCommand handles version display
 func handleVersionCommand() error {
-	fmt.Println("MyEncrypt ACME Server v0.1.0")
-	fmt.Println("Local development certificate authority")
+	info := GetVersionInfo()
+	
+	fmt.Println(GetVersionString())
 	fmt.Println()
-	fmt.Println("For more information, visit: https://github.com/myencrypt/myencrypt")
+	fmt.Printf("Version:    %s\n", info.Version)
+	fmt.Printf("Commit:     %s\n", info.Commit)
+	fmt.Printf("Built:      %s\n", info.Date)
+	fmt.Printf("Go version: %s\n", info.GoVersion)
+	fmt.Printf("Platform:   %s\n", info.Platform)
+	fmt.Println()
+	fmt.Println("MyEncrypt - Local ACME Certificate Authority")
+	fmt.Println("https://github.com/shibukawayoshiki/myencrypt2")
+	
 	return nil
 }
 

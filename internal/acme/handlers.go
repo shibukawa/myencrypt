@@ -17,7 +17,7 @@ func (s *Server) RegisterHandlers(router *mux.Router) {
 	acmeRouter := router.PathPrefix("/acme").Subrouter()
 	
 	// Directory endpoint (RFC 8555 Section 7.1.1)
-	acmeRouter.HandleFunc("/directory", s.handleDirectory).Methods("GET")
+	acmeRouter.HandleFunc("/directory", s.handleDirectory).Methods("GET", "HEAD")
 	
 	// Nonce endpoint (RFC 8555 Section 7.2)
 	acmeRouter.HandleFunc("/new-nonce", s.handleNewNonce).Methods("HEAD", "GET")
@@ -33,7 +33,7 @@ func (s *Server) RegisterHandlers(router *mux.Router) {
 	
 	// Authorization and challenge endpoints (RFC 8555 Section 7.5)
 	acmeRouter.HandleFunc("/authz/{authzId}", s.handleAuthorization).Methods("POST", "GET")
-	acmeRouter.HandleFunc("/challenge/{challengeId}", s.handleChallenge).Methods("POST", "GET")
+	acmeRouter.HandleFunc("/chall/{challengeId}", s.handleChallenge).Methods("POST", "GET")
 	
 	// Certificate endpoint (RFC 8555 Section 7.4.2)
 	acmeRouter.HandleFunc("/cert/{certId}", s.handleCertificate).Methods("POST", "GET")
@@ -53,6 +53,10 @@ func (s *Server) handleDirectory(w http.ResponseWriter, r *http.Request) {
 	
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "public, max-age=3600")
+	
+	// Add Link header for ACME directory (RFC 8555 Section 7.1.1)
+	// The "up" link points to the directory itself as per ACME specification
+	w.Header().Set("Link", fmt.Sprintf("<%s/acme/directory>;rel=\"index\"", s.baseURL))
 	
 	// Add CORS headers for development
 	w.Header().Set("Access-Control-Allow-Origin", "*")
@@ -311,10 +315,31 @@ func (s *Server) handleOrder(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	orderID := vars["orderId"]
 	
-	s.logger.Debug("Handling order request", "orderId", orderID, "method", r.Method)
+	s.logger.Info("Handling order request", "orderId", orderID, "method", r.Method, "url", r.URL.String())
+	
+	// Handle different HTTP methods
+	switch r.Method {
+	case "GET":
+		s.handleOrderGet(w, r, orderID)
+	case "POST":
+		s.handleOrderPost(w, r, orderID)
+	default:
+		s.writeError(w, &ProblemDetails{
+			Type:   ErrorTypeMalformed,
+			Title:  "Method not allowed",
+			Status: http.StatusMethodNotAllowed,
+			Detail: fmt.Sprintf("Method %s not allowed for order endpoint", r.Method),
+		})
+	}
+}
+
+// handleOrderGet handles GET requests for orders (status polling)
+func (s *Server) handleOrderGet(w http.ResponseWriter, r *http.Request, orderID string) {
+	s.logger.Info("Handling order GET request", "orderId", orderID)
 	
 	order, err := s.GetOrder(orderID)
 	if err != nil {
+		s.logger.Error("Failed to get order", "orderId", orderID, "error", err)
 		if problemDetails, ok := err.(*ProblemDetails); ok {
 			s.writeError(w, problemDetails)
 		} else {
@@ -328,8 +353,32 @@ func (s *Server) handleOrder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	
+	s.logger.Info("Order retrieved successfully", "orderId", orderID, "status", order.Status, "identifiers", len(order.Identifiers))
+	
+	// Generate new nonce for response
+	nonce, err := s.GenerateNonce()
+	if err != nil {
+		s.logger.Error("Failed to generate response nonce", "error", err)
+	} else {
+		w.Header().Set("Replay-Nonce", nonce)
+	}
+	
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(order)
+	if err := json.NewEncoder(w).Encode(order); err != nil {
+		s.logger.Error("Failed to encode order response", "orderId", orderID, "error", err)
+		return
+	}
+	
+	s.logger.Debug("Order response sent successfully", "orderId", orderID)
+}
+
+// handleOrderPost handles POST requests for orders (order updates)
+func (s *Server) handleOrderPost(w http.ResponseWriter, r *http.Request, orderID string) {
+	s.logger.Info("Handling order POST request", "orderId", orderID)
+	
+	// For now, POST to order endpoint just returns the current order status
+	// In a full ACME implementation, this might handle order updates
+	s.handleOrderGet(w, r, orderID)
 }
 
 // Placeholder handlers for endpoints not yet implemented
@@ -338,7 +387,7 @@ func (s *Server) handleFinalize(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	orderID := vars["orderId"]
 
-	s.logger.Info("Processing finalize request", "order_id", orderID)
+	s.logger.Info("Processing finalize request", "order_id", orderID, "method", r.Method, "url", r.URL.String())
 
 	// Parse JWS request
 	payload, err := s.parseJWSPayload(r)
@@ -432,7 +481,7 @@ func (s *Server) handleFinalize(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Validate CSR matches order identifiers
-	if err := s.validateCSR(csr, &order.Order); err != nil {
+	if err := s.validateCSR(csr, order); err != nil {
 		s.writeError(w, &ProblemDetails{
 			Type:   ErrorTypeBadCSR,
 			Title:  "Invalid CSR",
@@ -470,10 +519,10 @@ func (s *Server) handleFinalize(w http.ResponseWriter, r *http.Request) {
 
 	s.logger.Info("Generating certificate for finalized order", "domain", domain, "order_id", orderID)
 
-	// Generate certificate using our certificate manager
-	cert, err := s.certManager.GenerateCertificate(domain)
+	// Generate certificate using CSR from the client
+	cert, err := s.certManager.GenerateCertificateFromCSR(csr)
 	if err != nil {
-		s.logger.Error("Failed to generate certificate", "error", err, "domain", domain)
+		s.logger.Error("Failed to generate certificate from CSR", "error", err, "domain", domain)
 		s.writeError(w, &ProblemDetails{
 			Type:   ErrorTypeServerInternal,
 			Title:  "Certificate generation failed",
@@ -497,7 +546,8 @@ func (s *Server) handleFinalize(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Update order status and add certificate URL
-	certificateURL := fmt.Sprintf("%s/cert/%s", s.baseURL, orderID)
+	certificateURL := fmt.Sprintf("%s/acme/cert/%s", s.baseURL, orderID)
+	s.logger.Info("Setting certificate URL", "order_id", orderID, "certificate_url", certificateURL)
 	
 	// Update in persistent storage first
 	if s.storage != nil {
@@ -533,34 +583,392 @@ func (s *Server) handleFinalize(w http.ResponseWriter, r *http.Request) {
 		"order_id", orderID,
 		"cert_serial", cert.Certificate.SerialNumber.String())
 
+	// Generate new nonce for response
+	nonce, err := s.GenerateNonce()
+	if err != nil {
+		s.logger.Error("Failed to generate response nonce", "error", err)
+	} else {
+		w.Header().Set("Replay-Nonce", nonce)
+	}
+
 	// Return updated order
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(order)
 }
 
 func (s *Server) handleAuthorization(w http.ResponseWriter, r *http.Request) {
-	s.writeError(w, &ProblemDetails{
-		Type:   ErrorTypeServerInternal,
-		Title:  "Not implemented",
-		Status: http.StatusNotImplemented,
-		Detail: "Authorization handling is not yet implemented",
-	})
+	s.logger.Debug("Handling authorization request", "method", r.Method)
+	
+	// Extract authorization ID from URL
+	vars := mux.Vars(r)
+	authzID := vars["authzId"]
+	if authzID == "" {
+		s.writeError(w, &ProblemDetails{
+			Type:   ErrorTypeMalformed,
+			Title:  "Malformed request",
+			Status: http.StatusBadRequest,
+			Detail: "Missing authorization ID",
+		})
+		return
+	}
+	
+	// Get authorization from storage (try persistent storage first, then fallback to memory)
+	var authz *ServerAuthorization
+	var exists bool
+	
+	if s.storage != nil {
+		var storageErr error
+		authz, storageErr = s.storage.GetAuthorization(authzID)
+		exists = (storageErr == nil)
+		if !exists {
+			s.logger.Debug("Authorization not found in persistent storage, checking memory", "authz_id", authzID)
+		}
+	}
+	
+	// Fallback to memory storage if persistent storage fails or authorization not found
+	if !exists {
+		s.authorizationsMu.RLock()
+		authz, exists = s.authorizations[authzID]
+		s.authorizationsMu.RUnlock()
+	}
+	
+	if !exists {
+		s.writeError(w, &ProblemDetails{
+			Type:   ErrorTypeAccountDoesNotExist,
+			Title:  "Authorization not found",
+			Status: http.StatusNotFound,
+			Detail: fmt.Sprintf("Authorization %s not found", authzID),
+		})
+		return
+	}
+	
+	// Handle different HTTP methods
+	switch r.Method {
+	case "GET":
+		s.handleGetAuthorization(w, r, authz)
+	case "POST":
+		s.handlePostAuthorization(w, r, authz)
+	default:
+		s.writeError(w, &ProblemDetails{
+			Type:   ErrorTypeMalformed,
+			Title:  "Method not allowed",
+			Status: http.StatusMethodNotAllowed,
+			Detail: fmt.Sprintf("Method %s not allowed", r.Method),
+		})
+	}
+}
+
+func (s *Server) handleGetAuthorization(w http.ResponseWriter, r *http.Request, authz *ServerAuthorization) {
+	s.logger.Debug("Getting authorization", "authz_id", authz.ID)
+	
+	// Update challenge URLs to include full URLs
+	// The challenges in authz.Challenges already have the correct URLs set during creation
+	// No need to modify them here
+	
+	// Debug: Log challenge URLs
+	for i, challenge := range authz.Challenges {
+		s.logger.Debug("Authorization challenge", 
+			"index", i, 
+			"type", challenge.Type, 
+			"url", challenge.URL, 
+			"status", challenge.Status,
+			"token", challenge.Token)
+	}
+	
+	// Set response headers
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	
+	// Generate new nonce for response
+	nonce, err := s.GenerateNonce()
+	if err != nil {
+		s.logger.Error("Failed to generate response nonce", "error", err)
+	} else {
+		w.Header().Set("Replay-Nonce", nonce)
+	}
+	
+	// Return authorization
+	if err := json.NewEncoder(w).Encode(authz.Authorization); err != nil {
+		s.logger.Error("Failed to encode authorization response", "error", err)
+		s.writeError(w, &ProblemDetails{
+			Type:   ErrorTypeServerInternal,
+			Title:  "Internal server error",
+			Status: http.StatusInternalServerError,
+			Detail: "Failed to encode response",
+		})
+		return
+	}
+	
+	s.logger.Debug("Authorization retrieved successfully", "authz_id", authz.ID, "status", authz.Status)
+}
+
+func (s *Server) handlePostAuthorization(w http.ResponseWriter, r *http.Request, authz *ServerAuthorization) {
+	s.logger.Debug("Updating authorization", "authz_id", authz.ID)
+	
+	// Parse JWS request
+	jws, err := s.parseJWSRequest(r)
+	if err != nil {
+		s.logger.Error("Failed to parse JWS request", "error", err)
+		s.writeError(w, err.(*ProblemDetails))
+		return
+	}
+	
+	// For now, we don't support authorization updates via POST
+	// This is mainly used for deactivation, which we'll implement later
+	s.logger.Debug("Authorization POST request received", "authz_id", authz.ID, "payload", string(jws.Payload))
+	
+	// Just return the current authorization status
+	s.handleGetAuthorization(w, r, authz)
 }
 
 func (s *Server) handleChallenge(w http.ResponseWriter, r *http.Request) {
-	s.writeError(w, &ProblemDetails{
-		Type:   ErrorTypeServerInternal,
-		Title:  "Not implemented",
-		Status: http.StatusNotImplemented,
-		Detail: "Challenge handling is not yet implemented",
-	})
+	s.logger.Debug("Handling challenge request", "method", r.Method)
+	
+	// Extract challenge ID from URL
+	vars := mux.Vars(r)
+	challengeID := vars["challengeId"]
+	if challengeID == "" {
+		s.writeError(w, &ProblemDetails{
+			Type:   ErrorTypeMalformed,
+			Title:  "Malformed request",
+			Status: http.StatusBadRequest,
+			Detail: "Missing challenge ID",
+		})
+		return
+	}
+	
+	// Get challenge from storage (try persistent storage first, then fallback to memory)
+	var challenge *ServerChallenge
+	var exists bool
+	
+	if s.storage != nil {
+		var storageErr error
+		challenge, storageErr = s.storage.GetChallenge(challengeID)
+		exists = (storageErr == nil)
+		if !exists {
+			s.logger.Debug("Challenge not found in persistent storage, checking memory", "challenge_id", challengeID)
+		}
+	}
+	
+	// Fallback to memory storage if persistent storage fails or challenge not found
+	if !exists {
+		s.challengesMu.RLock()
+		challenge, exists = s.challenges[challengeID]
+		s.challengesMu.RUnlock()
+	}
+	
+	if !exists {
+		s.writeError(w, &ProblemDetails{
+			Type:   ErrorTypeAccountDoesNotExist,
+			Title:  "Challenge not found",
+			Status: http.StatusNotFound,
+			Detail: fmt.Sprintf("Challenge %s not found", challengeID),
+		})
+		return
+	}
+	
+	// Handle different HTTP methods
+	switch r.Method {
+	case "GET":
+		s.handleGetChallenge(w, r, challenge)
+	case "POST":
+		s.handlePostChallenge(w, r, challenge)
+	default:
+		s.writeError(w, &ProblemDetails{
+			Type:   ErrorTypeMalformed,
+			Title:  "Method not allowed",
+			Status: http.StatusMethodNotAllowed,
+			Detail: fmt.Sprintf("Method %s not allowed", r.Method),
+		})
+	}
+}
+
+func (s *Server) handleGetChallenge(w http.ResponseWriter, r *http.Request, challenge *ServerChallenge) {
+	s.logger.Debug("Getting challenge", "challenge_id", challenge.ID)
+	
+	// Set response headers
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	
+	// Generate new nonce for response
+	nonce, err := s.GenerateNonce()
+	if err != nil {
+		s.logger.Error("Failed to generate response nonce", "error", err)
+	} else {
+		w.Header().Set("Replay-Nonce", nonce)
+	}
+	
+	// Add "up" Link header pointing to the authorization (RFC 8555 Section 7.5.1)
+	w.Header().Set("Link", fmt.Sprintf("<%s/acme/authz/%s>;rel=\"up\"", s.baseURL, challenge.AuthzID))
+	
+	// Log challenge response for debugging
+	s.logger.Debug("Returning challenge response", 
+		"challenge_id", challenge.ID, 
+		"status", challenge.Status, 
+		"type", challenge.Type,
+		"token", challenge.Token,
+		"has_key_auth", challenge.KeyAuthorization != "")
+	
+	// Return challenge
+	if err := json.NewEncoder(w).Encode(challenge.Challenge); err != nil {
+		s.logger.Error("Failed to encode challenge response", "error", err)
+		s.writeError(w, &ProblemDetails{
+			Type:   ErrorTypeServerInternal,
+			Title:  "Internal server error",
+			Status: http.StatusInternalServerError,
+			Detail: "Failed to encode response",
+		})
+		return
+	}
+	
+	s.logger.Debug("Challenge retrieved successfully", "challenge_id", challenge.ID, "status", challenge.Status)
+}
+
+func (s *Server) handlePostChallenge(w http.ResponseWriter, r *http.Request, challenge *ServerChallenge) {
+	s.logger.Debug("Processing challenge", "challenge_id", challenge.ID)
+	
+	// Parse JWS request
+	jws, err := s.parseJWSRequest(r)
+	if err != nil {
+		s.logger.Error("Failed to parse JWS request", "error", err)
+		s.writeError(w, err.(*ProblemDetails))
+		return
+	}
+	
+	// Get account from JWS
+	account, err := s.getAccountFromJWS(jws)
+	if err != nil {
+		s.logger.Error("Failed to get account from JWS", "error", err)
+		s.writeError(w, err.(*ProblemDetails))
+		return
+	}
+	
+	// Verify that the account owns this challenge
+	authz, err := s.getAuthorizationForChallenge(challenge.AuthzID)
+	if err != nil {
+		s.logger.Error("Failed to get authorization for challenge", "error", err, "challenge_id", challenge.ID)
+		s.writeError(w, &ProblemDetails{
+			Type:   ErrorTypeServerInternal,
+			Title:  "Internal server error",
+			Status: http.StatusInternalServerError,
+			Detail: "Failed to get authorization",
+		})
+		return
+	}
+	
+	// Get the order to verify account ownership
+	order, err := s.getOrderForAuthorization(authz.OrderID)
+	if err != nil {
+		s.logger.Error("Failed to get order for authorization", "error", err, "authz_id", authz.ID)
+		s.writeError(w, &ProblemDetails{
+			Type:   ErrorTypeServerInternal,
+			Title:  "Internal server error",
+			Status: http.StatusInternalServerError,
+			Detail: "Failed to get order",
+		})
+		return
+	}
+	
+	if order.AccountID != account.ID {
+		s.writeError(w, &ProblemDetails{
+			Type:   ErrorTypeUnauthorized,
+			Title:  "Unauthorized",
+			Status: http.StatusForbidden,
+			Detail: "Account does not own this challenge",
+		})
+		return
+	}
+	
+	// If challenge is already valid or invalid, return current status
+	if challenge.Status == StatusValid || challenge.Status == StatusInvalid {
+		s.handleGetChallenge(w, r, challenge)
+		return
+	}
+	
+	// Start challenge validation
+	s.logger.Info("Starting challenge validation", "challenge_id", challenge.ID, "type", challenge.Type)
+	
+	// Don't update challenge status to processing immediately
+	// Keep it as pending until validation completes
+	// This prevents UnexpectedUpdate errors in ACME clients
+	
+	// Generate key authorization using account's JWK
+	keyAuth, err := s.generateKeyAuthorization(challenge.Token, account.Key)
+	if err != nil {
+		s.logger.Error("Failed to generate key authorization", "error", err)
+		// Log JWK details for debugging
+		if account.Key != nil {
+			s.logger.Debug("Account JWK details", "kty", account.Key.Kty, "alg", account.Key.Alg)
+		} else {
+			s.logger.Debug("Account JWK is nil")
+		}
+		s.writeError(w, &ProblemDetails{
+			Type:   ErrorTypeServerInternal,
+			Title:  "Internal server error",
+			Status: http.StatusInternalServerError,
+			Detail: "Failed to generate key authorization",
+		})
+		return
+	}
+	
+	challenge.KeyAuthorization = keyAuth
+	
+	// Update challenge in storage
+	s.updateChallengeInStorage(challenge)
+	
+	// Start validation in background
+	go s.validateChallenge(challenge, authz)
+	
+	// Return updated challenge
+	s.handleGetChallenge(w, r, challenge)
+}
+
+// getAccountFromJWS extracts account information from JWS
+func (s *Server) getAccountFromJWS(jws *JWS) (*ServerAccount, error) {
+	// Parse JWS header if not already parsed
+	if jws.Header == nil {
+		header, err := s.parseJWSHeader(jws.Protected)
+		if err != nil {
+			return nil, &ProblemDetails{
+				Type:   ErrorTypeMalformed,
+				Title:  "Malformed JWS header",
+				Status: http.StatusBadRequest,
+				Detail: "Failed to parse JWS header",
+			}
+		}
+		jws.Header = header
+	}
+	
+	// Extract account ID from kid field
+	accountID := s.extractAccountIDFromKid(jws.Header.Kid)
+	if accountID == "" {
+		return nil, &ProblemDetails{
+			Type:   ErrorTypeUnauthorized,
+			Title:  "Account not found",
+			Status: http.StatusUnauthorized,
+			Detail: "No valid account found in JWS",
+		}
+	}
+	
+	// Get account
+	account, err := s.GetAccount(accountID)
+	if err != nil {
+		return nil, err
+	}
+	
+	// Convert to ServerAccount
+	serverAccount := &ServerAccount{
+		Account: *account,
+	}
+	
+	return serverAccount, nil
 }
 
 func (s *Server) handleCertificate(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	certID := vars["certId"]
 
-	s.logger.Info("Certificate retrieval request", "cert_id", certID)
+	s.logger.Info("Certificate retrieval request", "cert_id", certID, "method", r.Method, "url", r.URL.String())
 
 	// Get certificate from storage (try persistent storage first, then fallback to memory)
 	var certChain []byte
@@ -571,7 +979,9 @@ func (s *Server) handleCertificate(w http.ResponseWriter, r *http.Request) {
 		certChain, storageErr = s.storage.GetCertificate(certID)
 		exists = (storageErr == nil)
 		if !exists {
-			s.logger.Debug("Certificate not found in persistent storage, checking memory", "cert_id", certID)
+			s.logger.Debug("Certificate not found in persistent storage, checking memory", "cert_id", certID, "error", storageErr)
+		} else {
+			s.logger.Debug("Certificate found in persistent storage", "cert_id", certID, "size", len(certChain))
 		}
 	}
 	
@@ -580,9 +990,15 @@ func (s *Server) handleCertificate(w http.ResponseWriter, r *http.Request) {
 		s.certificatesMu.RLock()
 		certChain, exists = s.certificates[certID]
 		s.certificatesMu.RUnlock()
+		if exists {
+			s.logger.Debug("Certificate found in memory storage", "cert_id", certID, "size", len(certChain))
+		} else {
+			s.logger.Debug("Certificate not found in memory storage", "cert_id", certID)
+		}
 	}
 
 	if !exists {
+		s.logger.Warn("Certificate not found", "cert_id", certID)
 		s.writeError(w, &ProblemDetails{
 			Type:   ErrorTypeOrderNotFound,
 			Title:  "Certificate not found",
@@ -593,6 +1009,14 @@ func (s *Server) handleCertificate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.logger.Info("Certificate retrieved successfully", "cert_id", certID, "size", len(certChain))
+
+	// Generate new nonce for response
+	nonce, err := s.GenerateNonce()
+	if err != nil {
+		s.logger.Error("Failed to generate response nonce", "error", err)
+	} else {
+		w.Header().Set("Replay-Nonce", nonce)
+	}
 
 	// Return certificate chain in PEM format
 	w.Header().Set("Content-Type", "application/pem-certificate-chain")
@@ -623,6 +1047,16 @@ func (s *Server) handleRevokeCert(w http.ResponseWriter, r *http.Request) {
 // writeError writes an ACME problem details error response
 func (s *Server) writeError(w http.ResponseWriter, problem *ProblemDetails) {
 	w.Header().Set("Content-Type", "application/problem+json")
+	w.Header().Set("Cache-Control", "no-store")
+	
+	// Generate new nonce for error response
+	nonce, err := s.GenerateNonce()
+	if err != nil {
+		s.logger.Error("Failed to generate response nonce for error", "error", err)
+	} else {
+		w.Header().Set("Replay-Nonce", nonce)
+	}
+	
 	w.WriteHeader(problem.Status)
 	
 	if err := json.NewEncoder(w).Encode(problem); err != nil {
@@ -642,44 +1076,4 @@ func (s *Server) extractAccountIDFromKid(kid string) string {
 }
 
 // validateCSR validates that the CSR matches the order identifiers
-func (s *Server) validateCSR(csr *x509.CertificateRequest, order *Order) error {
-	// Extract domains from CSR
-	csrDomains := make(map[string]bool)
-	
-	// Add common name if present
-	if csr.Subject.CommonName != "" {
-		csrDomains[csr.Subject.CommonName] = true
-	}
-	
-	// Add DNS SANs
-	for _, dnsName := range csr.DNSNames {
-		csrDomains[dnsName] = true
-	}
-	
-	// Check that all order identifiers are present in CSR
-	for _, identifier := range order.Identifiers {
-		if identifier.Type != "dns" {
-			continue // Skip non-DNS identifiers
-		}
-		
-		if !csrDomains[identifier.Value] {
-			return fmt.Errorf("CSR missing domain: %s", identifier.Value)
-		}
-	}
-	
-	// Check that CSR doesn't contain unauthorized domains
-	for domain := range csrDomains {
-		found := false
-		for _, identifier := range order.Identifiers {
-			if identifier.Type == "dns" && identifier.Value == domain {
-				found = true
-				break
-			}
-		}
-		if !found {
-			return fmt.Errorf("CSR contains unauthorized domain: %s", domain)
-		}
-	}
-	
-	return nil
-}
+

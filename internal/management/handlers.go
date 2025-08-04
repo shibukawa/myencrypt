@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -55,6 +56,8 @@ func (s *Server) RegisterHandlers(router *mux.Router) {
 	downloadRouter.HandleFunc("/install.ps1", s.handleDownloadInstallPs1).Methods("GET", "HEAD")
 	downloadRouter.HandleFunc("/uninstall.sh", s.handleDownloadUninstallSh).Methods("GET", "HEAD")
 	downloadRouter.HandleFunc("/uninstall.ps1", s.handleDownloadUninstallPs1).Methods("GET", "HEAD")
+	downloadRouter.HandleFunc("/uninstall-all.sh", s.handleDownloadUninstallAllSh).Methods("GET", "HEAD")
+	downloadRouter.HandleFunc("/uninstall-all.ps1", s.handleDownloadUninstallAllPs1).Methods("GET", "HEAD")
 	
 	// Download page
 	router.HandleFunc("/download/", s.handleWebUI).Methods("GET")
@@ -248,16 +251,35 @@ func (s *Server) serveDownloadInterface(w http.ResponseWriter, r *http.Request) 
 	userAgent := r.Header.Get("User-Agent")
 	isWindows := strings.Contains(strings.ToLower(userAgent), "windows")
 	
+	// Detect Docker environment and get exposed port
+	exposePort := os.Getenv("MYENCRYPT_EXPOSE_PORT")
+	var scriptPort int
+	if exposePort != "" {
+		// Docker mode: use exposed port for scripts
+		if p, err := strconv.Atoi(exposePort); err == nil {
+			scriptPort = p
+		} else {
+			scriptPort = s.config.HTTPPort
+		}
+	} else {
+		// Development mode: use configured port
+		scriptPort = s.config.HTTPPort
+	}
+	
 	var oneLineCommand string
 	var shellType string
 	
 	if isWindows {
 		shellType = "PowerShell"
-		oneLineCommand = fmt.Sprintf(`iwr -useb http://localhost:%d/download/install.ps1 | iex`, s.config.HTTPPort)
+		oneLineCommand = fmt.Sprintf(`iwr -useb http://localhost:%d/download/install.ps1 | iex`, scriptPort)
 	} else {
 		shellType = "Bash"
-		oneLineCommand = fmt.Sprintf(`/bin/bash -c "$(curl -fsSL http://localhost:%d/download/install.sh)"`, s.config.HTTPPort)
+		oneLineCommand = fmt.Sprintf(`/bin/bash -c "$(curl -fsSL http://localhost:%d/download/install.sh)"`, scriptPort)
 	}
+	
+	// Docker-specific commands (same as regular commands now since we detect Docker automatically)
+	dockerBashCommand := fmt.Sprintf(`curl -sSL http://localhost:%d/download/install.sh | bash`, scriptPort)
+	dockerPowerShellCommand := fmt.Sprintf(`curl http://localhost:%d/download/install.ps1 -o install.ps1; .\\install.ps1`, scriptPort)
 	
 	html := fmt.Sprintf(`<!DOCTYPE html>
 <html>
@@ -279,16 +301,116 @@ func (s *Server) serveDownloadInterface(w http.ResponseWriter, r *http.Request) 
         .method { font-weight: bold; color: #007acc; margin-right: 10px; }
         .oneliner { background: #2d3748; color: #e2e8f0; padding: 20px; border-radius: 8px; font-family: 'Courier New', monospace; margin: 15px 0; position: relative; }
         .oneliner code { color: #68d391; font-size: 14px; }
-        .copy-btn { position: absolute; top: 15px; right: 15px; background: #4a5568; color: white; border: none; padding: 8px 12px; border-radius: 4px; cursor: pointer; font-size: 12px; }
-        .copy-btn:hover { background: #2d3748; }
+        .copy-btn { 
+            position: absolute; 
+            top: 15px; 
+            right: 15px; 
+            background: #4a5568; 
+            color: white; 
+            border: none; 
+            padding: 8px 12px; 
+            border-radius: 4px; 
+            cursor: pointer; 
+            font-size: 12px; 
+            transition: all 0.2s ease;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        }
+        .copy-btn:hover { 
+            background: #2d3748; 
+            transform: translateY(-1px);
+            box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+        }
+        .copy-btn:active {
+            transform: translateY(0);
+            box-shadow: 0 1px 2px rgba(0,0,0,0.3);
+        }
         .highlight { background: #fff3cd; padding: 20px; border-radius: 8px; border-left: 4px solid #ffc107; margin: 20px 0; }
         .highlight h3 { margin-top: 0; color: #856404; }
+        .docker-highlight { background: #e3f2fd; padding: 20px; border-radius: 8px; border-left: 4px solid #2196f3; margin: 20px 0; }
+        .docker-highlight h3 { margin-top: 0; color: #1565c0; }
+        .platform-tabs { display: flex; margin-bottom: 15px; }
+        .platform-tab { background: #f0f0f0; padding: 10px 20px; border: none; cursor: pointer; border-radius: 4px 4px 0 0; margin-right: 5px; }
+        .platform-tab.active { background: #007acc; color: white; }
+        .platform-content { display: none; }
+        .platform-content.active { display: block; }
     </style>
     <script>
         function copyToClipboard(text) {
-            navigator.clipboard.writeText(text).then(function() {
-                alert('Copied to clipboard!');
-            });
+            // Modern browsers with Clipboard API
+            if (navigator.clipboard && window.isSecureContext) {
+                navigator.clipboard.writeText(text).then(function() {
+                    showCopySuccess();
+                }).catch(function(err) {
+                    console.error('Failed to copy with Clipboard API:', err);
+                    fallbackCopyToClipboard(text);
+                });
+            } else {
+                // Fallback for older browsers or non-HTTPS
+                fallbackCopyToClipboard(text);
+            }
+        }
+        
+        function fallbackCopyToClipboard(text) {
+            // Create a temporary textarea element
+            const textArea = document.createElement('textarea');
+            textArea.value = text;
+            textArea.style.position = 'fixed';
+            textArea.style.left = '-999999px';
+            textArea.style.top = '-999999px';
+            document.body.appendChild(textArea);
+            textArea.focus();
+            textArea.select();
+            
+            try {
+                const successful = document.execCommand('copy');
+                if (successful) {
+                    showCopySuccess();
+                } else {
+                    showCopyError();
+                }
+            } catch (err) {
+                console.error('Fallback copy failed:', err);
+                showCopyError();
+            } finally {
+                document.body.removeChild(textArea);
+            }
+        }
+        
+        function showCopySuccess() {
+            // Create a temporary success message
+            const message = document.createElement('div');
+            message.textContent = '✅ Copied to clipboard!';
+            message.style.cssText = 'position: fixed; top: 20px; right: 20px; background: #4CAF50; color: white; padding: 12px 20px; border-radius: 4px; z-index: 1000; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; box-shadow: 0 2px 8px rgba(0,0,0,0.2);';
+            document.body.appendChild(message);
+            
+            // Remove message after 3 seconds
+            setTimeout(() => {
+                if (message.parentNode) {
+                    message.parentNode.removeChild(message);
+                }
+            }, 3000);
+        }
+        
+        function showCopyError() {
+            // Create a temporary error message
+            const message = document.createElement('div');
+            message.textContent = '❌ Failed to copy. Please copy manually.';
+            message.style.cssText = 'position: fixed; top: 20px; right: 20px; background: #f44336; color: white; padding: 12px 20px; border-radius: 4px; z-index: 1000; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; box-shadow: 0 2px 8px rgba(0,0,0,0.2);';
+            document.body.appendChild(message);
+            
+            // Remove message after 5 seconds
+            setTimeout(() => {
+                if (message.parentNode) {
+                    message.parentNode.removeChild(message);
+                }
+            }, 5000);
+        }
+        
+        function showPlatform(platform) {
+            document.querySelectorAll('.platform-tab').forEach(tab => tab.classList.remove('active'));
+            document.querySelectorAll('.platform-content').forEach(content => content.classList.remove('active'));
+            document.querySelector('[data-platform="' + platform + '"]').classList.add('active');
+            document.querySelector('#' + platform + '-content').classList.add('active');
         }
     </script>
 </head>
@@ -307,12 +429,43 @@ func (s *Server) serveDownloadInterface(w http.ResponseWriter, r *http.Request) 
             <h2>🚀 Quick Setup</h2>
             <div class="highlight">
                 <h3>One-line Installation (%s)</h3>
-                <p>Run this command to download and install the CA certificate:</p>
+                <p>Run this command to automatically download and install the CA certificate:</p>
                 <div class="oneliner">
                     <button class="copy-btn" onclick="copyToClipboard('%s')">Copy</button>
                     <code>%s</code>
                 </div>
-                <p><small>This will download the CA certificate and install it to your system's trust store.</small></p>
+                <p><small>This script automatically downloads the CA certificate and installs it to your system's trust store.</small></p>
+            </div>
+        </div>
+        
+        <div class="section">
+            <h2>🐳 Docker Installation Guide</h2>
+            <div class="docker-highlight">
+                <h3>For Docker Users</h3>
+                <p>If you're running MyEncrypt in Docker, use these platform-specific commands:</p>
+                
+                <div class="platform-tabs">
+                    <button class="platform-tab active" data-platform="unix" onclick="showPlatform('unix')">macOS/Linux</button>
+                    <button class="platform-tab" data-platform="windows" onclick="showPlatform('windows')">Windows</button>
+                </div>
+                
+                <div id="unix-content" class="platform-content active">
+                    <div class="oneliner">
+                        <button class="copy-btn" onclick="copyToClipboard('%s')">Copy</button>
+                        <code>%s</code>
+                    </div>
+                    <p><small>One-liner for macOS and Linux systems (automatically downloads and installs)</small></p>
+                </div>
+                
+                <div id="windows-content" class="platform-content">
+                    <div class="oneliner">
+                        <button class="copy-btn" onclick="copyToClipboard('%s')">Copy</button>
+                        <code>%s</code>
+                    </div>
+                    <p><small>Two-step process for Windows PowerShell (downloads and installs automatically)</small></p>
+                </div>
+                
+                <p><strong>Note:</strong> These commands work when MyEncrypt is running in Docker and exposed on the host port.</p>
             </div>
         </div>
         
@@ -350,6 +503,21 @@ func (s *Server) serveDownloadInterface(w http.ResponseWriter, r *http.Request) 
         </div>
         
         <div class="section">
+            <h2>🗑️ Complete Removal Scripts</h2>
+            <p><strong>⚠️ Warning:</strong> These scripts remove ALL MyEncrypt CA certificates from your system, including certificates from other projects.</p>
+            <div class="api-endpoint">
+                <span class="method">GET</span> 
+                <a href="/download/uninstall-all.sh">/download/uninstall-all.sh</a> 
+                <span>- Unix/Linux complete removal script</span>
+            </div>
+            <div class="api-endpoint">
+                <span class="method">GET</span> 
+                <a href="/download/uninstall-all.ps1">/download/uninstall-all.ps1</a> 
+                <span>- Windows PowerShell complete removal script</span>
+            </div>
+        </div>
+        
+        <div class="section">
             <h2>📦 Complete Bundle</h2>
             <div class="api-endpoint">
                 <span class="method">GET</span> 
@@ -374,7 +542,7 @@ func (s *Server) serveDownloadInterface(w http.ResponseWriter, r *http.Request) 
         </div>
     </div>
 </body>
-</html>`, shellType, oneLineCommand, oneLineCommand, s.config.HTTPPort, s.config.HTTPPort, s.config.HTTPPort, s.config.HTTPPort)
+</html>`, shellType, oneLineCommand, oneLineCommand, dockerBashCommand, dockerBashCommand, dockerPowerShellCommand, dockerPowerShellCommand, scriptPort, scriptPort, scriptPort, scriptPort)
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Write([]byte(html))
@@ -450,6 +618,32 @@ For more information, visit: https://github.com/myencrypt/myencrypt
 func (s *Server) handleDownloadInstallSh(w http.ResponseWriter, r *http.Request) {
 	s.logger.Debug("Install script download requested", "remote_addr", r.RemoteAddr)
 	
+	// Detect Docker environment and get exposed port
+	exposePort := os.Getenv("MYENCRYPT_EXPOSE_PORT")
+	projectName := os.Getenv("MYENCRYPT_PROJECT_NAME")
+	var scriptPort int
+	if exposePort != "" {
+		// Docker mode: use exposed port for scripts
+		if p, err := strconv.Atoi(exposePort); err == nil {
+			scriptPort = p
+		} else {
+			scriptPort = s.config.HTTPPort
+		}
+	} else {
+		// Development mode: use configured port
+		scriptPort = s.config.HTTPPort
+	}
+	
+	// Determine Linux file name
+	var linuxFileName string
+	if projectName != "" {
+		// Docker mode: include project name
+		linuxFileName = fmt.Sprintf("myencrypt-%s-rootCA.crt", projectName)
+	} else {
+		// Service mode: use default name
+		linuxFileName = "myencrypt-rootCA.crt"
+	}
+	
 	script := fmt.Sprintf(`#!/bin/bash
 # MyEncrypt CA Installation Script
 
@@ -466,19 +660,116 @@ if [[ "$OSTYPE" == "darwin"* ]]; then
     echo "✅ CA certificate installed to macOS system keychain"
 # Install to system trust store (Linux)
 elif [[ "$OSTYPE" == "linux-gnu"* ]]; then
-    sudo cp /tmp/myencrypt-rootCA.pem /usr/local/share/ca-certificates/myencrypt-rootCA.crt
+    sudo cp /tmp/myencrypt-rootCA.pem /usr/local/share/ca-certificates/%s
     sudo update-ca-certificates
     echo "✅ CA certificate installed to Linux system trust store"
 else
     echo "⚠️  Unsupported OS. Please manually install /tmp/myencrypt-rootCA.pem"
 fi
 
+# Install to Java keystore
+install_java() {
+    local java_home=""
+    local keytool=""
+    
+    # Find Java installation
+    if [[ -n "$JAVA_HOME" ]] && [[ -x "$JAVA_HOME/bin/keytool" ]]; then
+        keytool="$JAVA_HOME/bin/keytool"
+    elif command -v keytool >/dev/null 2>&1; then
+        keytool="keytool"
+    elif [[ "$OSTYPE" == "darwin"* ]] && [[ -x "/usr/libexec/java_home" ]]; then
+        java_home=$(/usr/libexec/java_home 2>/dev/null) && keytool="$java_home/bin/keytool"
+    elif [[ -x "/usr/bin/keytool" ]]; then
+        keytool="/usr/bin/keytool"
+    fi
+    
+    if [[ -n "$keytool" ]]; then
+        # Convert PEM to DER format for Java
+        openssl x509 -outform der -in /tmp/myencrypt-rootCA.pem -out /tmp/myencrypt-rootCA.der 2>/dev/null || return 1
+        
+        # Install to Java keystore (try common locations)
+        local installed=false
+        for cacerts in \
+            "$JAVA_HOME/lib/security/cacerts" \
+            "$JAVA_HOME/jre/lib/security/cacerts" \
+            "/etc/ssl/certs/java/cacerts" \
+            "/usr/lib/jvm/default-java/lib/security/cacerts" \
+            "/usr/lib/jvm/java-*/lib/security/cacerts" \
+            "/System/Library/Java/Support/CoreDeploy.bundle/Contents/Home/lib/security/cacerts" \
+            "/Library/Java/JavaVirtualMachines/*/Contents/Home/lib/security/cacerts"; do
+            
+            if [[ -f "$cacerts" ]] && [[ -w "$cacerts" || -w "$(dirname "$cacerts")" ]]; then
+                if sudo "$keytool" -importcert -file /tmp/myencrypt-rootCA.der -alias myencrypt-ca -keystore "$cacerts" -storepass changeit -noprompt 2>/dev/null; then
+                    echo "✅ CA certificate installed to Java keystore: $cacerts"
+                    installed=true
+                    break
+                fi
+            fi
+        done
+        
+        if [[ "$installed" == false ]]; then
+            echo "⚠️  Java keystore found but installation failed (try running as administrator)"
+        fi
+        
+        rm -f /tmp/myencrypt-rootCA.der
+    else
+        echo "ℹ️  Java not found, skipping Java keystore installation"
+    fi
+}
+
+# Install to NSS databases (Firefox, Chrome on Linux)
+install_nss() {
+    if ! command -v certutil >/dev/null 2>&1; then
+        echo "ℹ️  NSS tools not found, skipping NSS database installation"
+        return
+    fi
+    
+    local installed=false
+    
+    # Find NSS databases
+    local nss_dirs=(
+        "$HOME/.pki/nssdb"                    # Chrome/Chromium on Linux
+        "$HOME/.mozilla/firefox/*/."         # Firefox profiles
+        "$HOME/snap/firefox/common/.mozilla/firefox/*/." # Firefox snap
+        "/etc/pki/nssdb"                     # System-wide NSS
+    )
+    
+    for nss_dir in "${nss_dirs[@]}"; do
+        # Handle glob patterns
+        for dir in $nss_dir; do
+            if [[ -d "$dir" ]] && [[ -f "$dir/cert9.db" || -f "$dir/cert8.db" ]]; then
+                if certutil -A -n "MyEncrypt Development CA" -t "C,," -i /tmp/myencrypt-rootCA.pem -d "$dir" 2>/dev/null; then
+                    echo "✅ CA certificate installed to NSS database: $dir"
+                    installed=true
+                fi
+            fi
+        done
+    done
+    
+    if [[ "$installed" == false ]]; then
+        echo "ℹ️  No NSS databases found or installation failed"
+    fi
+}
+
+# Install to additional trust stores
+echo ""
+echo "Installing to additional trust stores..."
+install_java
+install_nss
+
 # Cleanup
 rm -f /tmp/myencrypt-rootCA.pem
 
+echo ""
 echo "🎉 MyEncrypt CA installation completed!"
 echo "ACME server URL: http://localhost:%d/acme/directory"
-`, s.config.HTTPPort, s.config.HTTPPort)
+echo ""
+echo "To uninstall the CA certificate later:"
+echo "   curl -sSL http://localhost:%d/download/uninstall.sh | bash"
+echo ""
+echo "To remove ALL MyEncrypt CA certificates:"
+echo "   curl -sSL http://localhost:%d/download/uninstall-all.sh | bash"
+`, scriptPort, linuxFileName, scriptPort, scriptPort, scriptPort)
 	
 	w.Header().Set("Content-Type", "text/plain")
 	w.Header().Set("Content-Disposition", "attachment; filename=\"install.sh\"")
@@ -487,6 +778,21 @@ echo "ACME server URL: http://localhost:%d/acme/directory"
 
 func (s *Server) handleDownloadInstallPs1(w http.ResponseWriter, r *http.Request) {
 	s.logger.Debug("PowerShell install script download requested", "remote_addr", r.RemoteAddr)
+	
+	// Detect Docker environment and get exposed port
+	exposePort := os.Getenv("MYENCRYPT_EXPOSE_PORT")
+	var scriptPort int
+	if exposePort != "" {
+		// Docker mode: use exposed port for scripts
+		if p, err := strconv.Atoi(exposePort); err == nil {
+			scriptPort = p
+		} else {
+			scriptPort = s.config.HTTPPort
+		}
+	} else {
+		// Development mode: use configured port
+		scriptPort = s.config.HTTPPort
+	}
 	
 	script := fmt.Sprintf(`# MyEncrypt CA Installation Script (PowerShell)
 
@@ -505,8 +811,105 @@ try {
     $store.Close()
     
     Write-Host "✅ CA certificate installed to Windows certificate store" -ForegroundColor Green
+    
+    # Install to Java keystore
+    function Install-JavaKeystore {
+        $javaHome = $env:JAVA_HOME
+        $keytool = $null
+        
+        # Find Java installation
+        if ($javaHome -and (Test-Path "$javaHome\bin\keytool.exe")) {
+            $keytool = "$javaHome\bin\keytool.exe"
+        } elseif (Get-Command keytool -ErrorAction SilentlyContinue) {
+            $keytool = "keytool"
+        }
+        
+        if ($keytool) {
+            # Convert PEM to DER format for Java
+            $derFile = [System.IO.Path]::GetTempFileName() + ".der"
+            try {
+                $pemContent = Get-Content $tempFile -Raw
+                $cert = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new([System.Text.Encoding]::UTF8.GetBytes($pemContent))
+                [System.IO.File]::WriteAllBytes($derFile, $cert.RawData)
+                
+                # Try common Java keystore locations
+                $cacertsPaths = @(
+                    "$javaHome\lib\security\cacerts",
+                    "$javaHome\jre\lib\security\cacerts"
+                )
+                
+                $installed = $false
+                foreach ($cacerts in $cacertsPaths) {
+                    if (Test-Path $cacerts) {
+                        try {
+                            & $keytool -importcert -file $derFile -alias myencrypt-ca -keystore $cacerts -storepass changeit -noprompt 2>$null
+                            if ($LASTEXITCODE -eq 0) {
+                                Write-Host "✅ CA certificate installed to Java keystore: $cacerts" -ForegroundColor Green
+                                $installed = $true
+                                break
+                            }
+                        } catch { }
+                    }
+                }
+                
+                if (-not $installed) {
+                    Write-Host "⚠️  Java keystore found but installation failed (try running as administrator)" -ForegroundColor Yellow
+                }
+            } finally {
+                if (Test-Path $derFile) { Remove-Item $derFile -Force }
+            }
+        } else {
+            Write-Host "ℹ️  Java not found, skipping Java keystore installation" -ForegroundColor Cyan
+        }
+    }
+    
+    # Install to NSS databases (Firefox)
+    function Install-NSSDatabase {
+        if (-not (Get-Command certutil -ErrorAction SilentlyContinue)) {
+            Write-Host "ℹ️  NSS tools not found, skipping NSS database installation" -ForegroundColor Cyan
+            return
+        }
+        
+        $installed = $false
+        $appData = $env:APPDATA
+        if ($appData) {
+            $firefoxProfilesPath = "$appData\Mozilla\Firefox\Profiles"
+            if (Test-Path $firefoxProfilesPath) {
+                $profiles = Get-ChildItem $firefoxProfilesPath -Directory
+                foreach ($profile in $profiles) {
+                    if ((Test-Path "$($profile.FullName)\cert9.db") -or (Test-Path "$($profile.FullName)\cert8.db")) {
+                        try {
+                            & certutil -A -n "MyEncrypt Development CA" -t "C,," -i $tempFile -d $profile.FullName 2>$null
+                            if ($LASTEXITCODE -eq 0) {
+                                Write-Host "✅ CA certificate installed to NSS database: $($profile.FullName)" -ForegroundColor Green
+                                $installed = $true
+                            }
+                        } catch { }
+                    }
+                }
+            }
+        }
+        
+        if (-not $installed) {
+            Write-Host "ℹ️  No NSS databases found or installation failed" -ForegroundColor Cyan
+        }
+    }
+    
+    # Install to additional trust stores
+    Write-Host ""
+    Write-Host "Installing to additional trust stores..." -ForegroundColor Green
+    Install-JavaKeystore
+    Install-NSSDatabase
+    
+    Write-Host ""
     Write-Host "🎉 MyEncrypt CA installation completed!" -ForegroundColor Green
     Write-Host "ACME server URL: http://localhost:%d/acme/directory" -ForegroundColor Yellow
+    Write-Host ""
+    Write-Host "To uninstall the CA certificate later:" -ForegroundColor Yellow
+    Write-Host "   curl http://localhost:%d/download/uninstall.ps1 -o uninstall.ps1; .\\uninstall.ps1" -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "To remove ALL MyEncrypt CA certificates:" -ForegroundColor Yellow
+    Write-Host "   curl http://localhost:%d/download/uninstall-all.ps1 -o uninstall-all.ps1; .\\uninstall-all.ps1" -ForegroundColor Cyan
     
     # Cleanup
     Remove-Item $tempFile -Force
@@ -515,7 +918,7 @@ catch {
     Write-Host "❌ Installation failed: $_" -ForegroundColor Red
     exit 1
 }
-`, s.config.HTTPPort, s.config.HTTPPort)
+`, scriptPort, scriptPort, scriptPort)
 	
 	w.Header().Set("Content-Type", "text/plain")
 	w.Header().Set("Content-Disposition", "attachment; filename=\"install.ps1\"")
@@ -525,7 +928,35 @@ catch {
 func (s *Server) handleDownloadUninstallSh(w http.ResponseWriter, r *http.Request) {
 	s.logger.Debug("Uninstall script download requested", "remote_addr", r.RemoteAddr)
 	
-	script := `#!/bin/bash
+	// Detect Docker environment and get exposed port
+	exposePort := os.Getenv("MYENCRYPT_EXPOSE_PORT")
+	projectName := os.Getenv("MYENCRYPT_PROJECT_NAME")
+	var scriptPort int
+	if exposePort != "" {
+		// Docker mode: use exposed port for scripts
+		if p, err := strconv.Atoi(exposePort); err == nil {
+			scriptPort = p
+		} else {
+			scriptPort = s.config.HTTPPort
+		}
+	} else {
+		// Development mode: use configured port
+		scriptPort = s.config.HTTPPort
+	}
+	
+	// Determine CA certificate name
+	var caName, linuxFileName string
+	if projectName != "" {
+		// Docker mode: include project name
+		caName = fmt.Sprintf("MyEncrypt Development CA (%s)", projectName)
+		linuxFileName = fmt.Sprintf("myencrypt-%s-rootCA.crt", projectName)
+	} else {
+		// Service mode: use default name
+		caName = "MyEncrypt Development CA"
+		linuxFileName = "myencrypt-rootCA.crt"
+	}
+	
+	script := fmt.Sprintf(`#!/bin/bash
 # MyEncrypt CA Uninstallation Script
 
 set -e
@@ -534,11 +965,11 @@ echo "Uninstalling MyEncrypt CA certificate..."
 
 # Uninstall from system trust store (macOS)
 if [[ "$OSTYPE" == "darwin"* ]]; then
-    sudo security delete-certificate -c "MyEncrypt Development CA" /Library/Keychains/System.keychain || true
+    sudo security delete-certificate -c "%s" /Library/Keychains/System.keychain || true
     echo "✅ CA certificate removed from macOS system keychain"
 # Uninstall from system trust store (Linux)
 elif [[ "$OSTYPE" == "linux-gnu"* ]]; then
-    sudo rm -f /usr/local/share/ca-certificates/myencrypt-rootCA.crt
+    sudo rm -f /usr/local/share/ca-certificates/%s
     sudo update-ca-certificates
     echo "✅ CA certificate removed from Linux system trust store"
 else
@@ -546,7 +977,92 @@ else
 fi
 
 echo "🎉 MyEncrypt CA uninstallation completed!"
-`
+
+# Uninstall from Java keystore
+uninstall_java() {
+    local keytool=""
+    
+    # Find Java installation
+    if [[ -n "$JAVA_HOME" ]] && [[ -x "$JAVA_HOME/bin/keytool" ]]; then
+        keytool="$JAVA_HOME/bin/keytool"
+    elif command -v keytool >/dev/null 2>&1; then
+        keytool="keytool"
+    elif [[ "$OSTYPE" == "darwin"* ]] && [[ -x "/usr/libexec/java_home" ]]; then
+        java_home=$(/usr/libexec/java_home 2>/dev/null) && keytool="$java_home/bin/keytool"
+    elif [[ -x "/usr/bin/keytool" ]]; then
+        keytool="/usr/bin/keytool"
+    fi
+    
+    if [[ -n "$keytool" ]]; then
+        local removed=false
+        for cacerts in \
+            "$JAVA_HOME/lib/security/cacerts" \
+            "$JAVA_HOME/jre/lib/security/cacerts" \
+            "/etc/ssl/certs/java/cacerts" \
+            "/usr/lib/jvm/default-java/lib/security/cacerts" \
+            "/usr/lib/jvm/java-*/lib/security/cacerts" \
+            "/System/Library/Java/Support/CoreDeploy.bundle/Contents/Home/lib/security/cacerts" \
+            "/Library/Java/JavaVirtualMachines/*/Contents/Home/lib/security/cacerts"; do
+            
+            if [[ -f "$cacerts" ]] && [[ -w "$cacerts" || -w "$(dirname "$cacerts")" ]]; then
+                if sudo "$keytool" -delete -alias myencrypt-ca -keystore "$cacerts" -storepass changeit -noprompt 2>/dev/null; then
+                    echo "✅ CA certificate removed from Java keystore: $cacerts"
+                    removed=true
+                fi
+            fi
+        done
+        
+        if [[ "$removed" == false ]]; then
+            echo "ℹ️  No MyEncrypt CA certificates found in Java keystores"
+        fi
+    else
+        echo "ℹ️  Java not found, skipping Java keystore removal"
+    fi
+}
+
+# Uninstall from NSS databases
+uninstall_nss() {
+    if ! command -v certutil >/dev/null 2>&1; then
+        echo "ℹ️  NSS tools not found, skipping NSS database removal"
+        return
+    fi
+    
+    local removed=false
+    local nss_dirs=(
+        "$HOME/.pki/nssdb"
+        "$HOME/.mozilla/firefox/*/."
+        "$HOME/snap/firefox/common/.mozilla/firefox/*/."
+        "/etc/pki/nssdb"
+    )
+    
+    for nss_dir in "${nss_dirs[@]}"; do
+        for dir in $nss_dir; do
+            if [[ -d "$dir" ]] && [[ -f "$dir/cert9.db" || -f "$dir/cert8.db" ]]; then
+                if certutil -D -n "MyEncrypt Development CA" -d "$dir" 2>/dev/null; then
+                    echo "✅ CA certificate removed from NSS database: $dir"
+                    removed=true
+                fi
+            fi
+        done
+    done
+    
+    if [[ "$removed" == false ]]; then
+        echo "ℹ️  No MyEncrypt CA certificates found in NSS databases"
+    fi
+}
+
+echo ""
+echo "Removing from additional trust stores..."
+uninstall_java
+uninstall_nss
+
+echo ""
+echo "To reinstall the CA certificate:"
+echo "   curl -sSL http://localhost:%d/download/install.sh | bash"
+echo ""
+echo "To remove ALL MyEncrypt CA certificates:"
+echo "   curl -sSL http://localhost:%d/download/uninstall-all.sh | bash"
+`, caName, linuxFileName, scriptPort, scriptPort)
 	
 	w.Header().Set("Content-Type", "text/plain")
 	w.Header().Set("Content-Disposition", "attachment; filename=\"uninstall.sh\"")
@@ -556,7 +1072,33 @@ echo "🎉 MyEncrypt CA uninstallation completed!"
 func (s *Server) handleDownloadUninstallPs1(w http.ResponseWriter, r *http.Request) {
 	s.logger.Debug("PowerShell uninstall script download requested", "remote_addr", r.RemoteAddr)
 	
-	script := `# MyEncrypt CA Uninstallation Script (PowerShell)
+	// Detect Docker environment and get exposed port
+	exposePort := os.Getenv("MYENCRYPT_EXPOSE_PORT")
+	projectName := os.Getenv("MYENCRYPT_PROJECT_NAME")
+	var scriptPort int
+	if exposePort != "" {
+		// Docker mode: use exposed port for scripts
+		if p, err := strconv.Atoi(exposePort); err == nil {
+			scriptPort = p
+		} else {
+			scriptPort = s.config.HTTPPort
+		}
+	} else {
+		// Development mode: use configured port
+		scriptPort = s.config.HTTPPort
+	}
+	
+	// Determine CA certificate name
+	var caName string
+	if projectName != "" {
+		// Docker mode: include project name
+		caName = fmt.Sprintf("MyEncrypt Development CA (%s)", projectName)
+	} else {
+		// Service mode: use default name
+		caName = "MyEncrypt Development CA"
+	}
+	
+	script := fmt.Sprintf(`# MyEncrypt CA Uninstallation Script (PowerShell)
 
 Write-Host "Uninstalling MyEncrypt CA certificate..." -ForegroundColor Green
 
@@ -565,7 +1107,7 @@ try {
     $store = New-Object System.Security.Cryptography.X509Certificates.X509Store("Root", "LocalMachine")
     $store.Open("ReadWrite")
     
-    $certs = $store.Certificates | Where-Object { $_.Subject -like "*MyEncrypt Development CA*" }
+    $certs = $store.Certificates | Where-Object { $_.Subject -like "*%s*" }
     foreach ($cert in $certs) {
         $store.Remove($cert)
         Write-Host "Removed certificate: $($cert.Subject)" -ForegroundColor Yellow
@@ -575,15 +1117,148 @@ try {
     
     Write-Host "✅ CA certificate removed from Windows certificate store" -ForegroundColor Green
     Write-Host "🎉 MyEncrypt CA uninstallation completed!" -ForegroundColor Green
+    Write-Host ""
+    Write-Host "To reinstall the CA certificate:" -ForegroundColor Yellow
+    Write-Host "   curl http://localhost:%d/download/install.ps1 -o install.ps1; .\\install.ps1" -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "To remove ALL MyEncrypt CA certificates:" -ForegroundColor Yellow
+    Write-Host "   curl http://localhost:%d/download/uninstall-all.ps1 -o uninstall-all.ps1; .\\uninstall-all.ps1" -ForegroundColor Cyan
 }
 catch {
     Write-Host "❌ Uninstallation failed: $_" -ForegroundColor Red
     exit 1
 }
-`
+`, caName, scriptPort, scriptPort)
 	
 	w.Header().Set("Content-Type", "text/plain")
 	w.Header().Set("Content-Disposition", "attachment; filename=\"uninstall.ps1\"")
+	w.Write([]byte(script))
+}
+
+func (s *Server) handleDownloadUninstallAllSh(w http.ResponseWriter, r *http.Request) {
+	s.logger.Debug("Uninstall-all script download requested", "remote_addr", r.RemoteAddr)
+	
+	// Detect Docker environment and get exposed port
+	exposePort := os.Getenv("MYENCRYPT_EXPOSE_PORT")
+	var scriptPort int
+	if exposePort != "" {
+		// Docker mode: use exposed port for scripts
+		if p, err := strconv.Atoi(exposePort); err == nil {
+			scriptPort = p
+		} else {
+			scriptPort = s.config.HTTPPort
+		}
+	} else {
+		// Development mode: use configured port
+		scriptPort = s.config.HTTPPort
+	}
+	
+	script := fmt.Sprintf(`#!/bin/bash
+# MyEncrypt CA Complete Uninstallation Script
+# This script removes ALL MyEncrypt CA certificates from the system
+
+set -e
+
+echo "Uninstalling ALL MyEncrypt CA certificates..."
+echo "⚠️  This will remove all MyEncrypt CA certificates from your system trust store."
+echo ""
+
+# Uninstall from system trust store (macOS)
+if [[ "$OSTYPE" == "darwin"* ]]; then
+    echo "Removing all MyEncrypt CA certificates from macOS system keychain..."
+    # Remove all certificates containing "MyEncrypt Development CA"
+    while IFS= read -r cert_name; do
+        if [[ -n "$cert_name" ]]; then
+            sudo security delete-certificate -c "$cert_name" /Library/Keychains/System.keychain || true
+            echo "  ✅ Removed: $cert_name"
+        fi
+    done < <(security find-certificate -a -c "MyEncrypt Development CA" /Library/Keychains/System.keychain 2>/dev/null | grep "alis" | sed 's/.*"alis"<blob>="\([^"]*\)".*/\1/' || true)
+    echo "✅ All MyEncrypt CA certificates removed from macOS system keychain"
+
+# Uninstall from system trust store (Linux)
+elif [[ "$OSTYPE" == "linux-gnu"* ]]; then
+    echo "Removing all MyEncrypt CA certificates from Linux system trust store..."
+    # Remove all myencrypt-*.crt files
+    sudo rm -f /usr/local/share/ca-certificates/myencrypt*.crt
+    sudo rm -f /usr/local/share/ca-certificates/myencrypt-*-rootCA.crt
+    sudo update-ca-certificates
+    echo "✅ All MyEncrypt CA certificates removed from Linux system trust store"
+else
+    echo "⚠️  Unsupported OS. Please manually remove all MyEncrypt CA certificates"
+fi
+
+echo ""
+echo "🎉 Complete MyEncrypt CA uninstallation completed!"
+echo ""
+echo "To install a new CA certificate:"
+echo "   curl -sSL http://localhost:%d/download/install.sh | bash"
+`, scriptPort)
+	
+	w.Header().Set("Content-Type", "text/plain")
+	w.Header().Set("Content-Disposition", "attachment; filename=\"uninstall-all.sh\"")
+	w.Write([]byte(script))
+}
+
+func (s *Server) handleDownloadUninstallAllPs1(w http.ResponseWriter, r *http.Request) {
+	s.logger.Debug("PowerShell uninstall-all script download requested", "remote_addr", r.RemoteAddr)
+	
+	// Detect Docker environment and get exposed port
+	exposePort := os.Getenv("MYENCRYPT_EXPOSE_PORT")
+	var scriptPort int
+	if exposePort != "" {
+		// Docker mode: use exposed port for scripts
+		if p, err := strconv.Atoi(exposePort); err == nil {
+			scriptPort = p
+		} else {
+			scriptPort = s.config.HTTPPort
+		}
+	} else {
+		// Development mode: use configured port
+		scriptPort = s.config.HTTPPort
+	}
+	
+	script := fmt.Sprintf(`# MyEncrypt CA Complete Uninstallation Script (PowerShell)
+# This script removes ALL MyEncrypt CA certificates from the Windows certificate store
+
+Write-Host "Uninstalling ALL MyEncrypt CA certificates..." -ForegroundColor Green
+Write-Host "⚠️  This will remove all MyEncrypt CA certificates from your system trust store." -ForegroundColor Yellow
+Write-Host ""
+
+try {
+    # Remove from Windows certificate store
+    $store = New-Object System.Security.Cryptography.X509Certificates.X509Store("Root", "LocalMachine")
+    $store.Open("ReadWrite")
+    
+    Write-Host "Searching for MyEncrypt CA certificates..." -ForegroundColor Green
+    $certs = $store.Certificates | Where-Object { $_.Subject -like "*MyEncrypt Development CA*" }
+    
+    if ($certs.Count -eq 0) {
+        Write-Host "No MyEncrypt CA certificates found." -ForegroundColor Yellow
+    } else {
+        Write-Host "Found $($certs.Count) MyEncrypt CA certificate(s). Removing..." -ForegroundColor Green
+        foreach ($cert in $certs) {
+            $store.Remove($cert)
+            Write-Host "  ✅ Removed certificate: $($cert.Subject)" -ForegroundColor Yellow
+        }
+    }
+    
+    $store.Close()
+    
+    Write-Host ""
+    Write-Host "✅ All MyEncrypt CA certificates removed from Windows certificate store" -ForegroundColor Green
+    Write-Host "🎉 Complete MyEncrypt CA uninstallation completed!" -ForegroundColor Green
+    Write-Host ""
+    Write-Host "To install a new CA certificate:" -ForegroundColor Yellow
+    Write-Host "   curl http://localhost:%d/download/install.ps1 -o install.ps1; .\\install.ps1" -ForegroundColor Cyan
+}
+catch {
+    Write-Host "❌ Uninstallation failed: $_" -ForegroundColor Red
+    exit 1
+}
+`, scriptPort)
+	
+	w.Header().Set("Content-Type", "text/plain")
+	w.Header().Set("Content-Disposition", "attachment; filename=\"uninstall-all.ps1\"")
 	w.Write([]byte(script))
 }
 

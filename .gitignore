@@ -109,3 +109,5 @@ export/
 # Test artifacts
 /var/folders/*/myencrypt-*
 /tmp/myencrypt-*
+install.sh
+uninstall.sh

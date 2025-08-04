@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/shibukawayoshiki/myencrypt2/internal/config"
@@ -33,17 +34,25 @@ type Certificate struct {
 
 // CertificateManager handles individual certificate operations
 type CertificateManager struct {
-	config    *config.Config
-	logger    *logger.Logger
-	caManager *CAManager
+	config       *config.Config
+	logger       *logger.Logger
+	caManager    *CAManager
+	certDir      string
+	certificates map[string]*Certificate
+	mu           sync.RWMutex
 }
 
 // NewCertificateManager creates a new certificate manager
 func NewCertificateManager(cfg *config.Config, log *logger.Logger, caManager *CAManager) *CertificateManager {
+	certDir := filepath.Join(cfg.GetCertStorePath(), "certificates")
+	os.MkdirAll(certDir, 0755)
+	
 	return &CertificateManager{
-		config:    cfg,
-		logger:    log.WithComponent("cert-manager"),
-		caManager: caManager,
+		config:       cfg,
+		logger:       log.WithComponent("cert-manager"),
+		caManager:    caManager,
+		certDir:      certDir,
+		certificates: make(map[string]*Certificate),
 	}
 }
 
@@ -347,4 +356,157 @@ func (cm *CombinedManager) RegenerateCA() error {
 	
 	cm.caManager.logger.Info("CA certificate regenerated successfully")
 	return nil
+}
+
+// ListCertificates returns all stored certificates
+func (cm *CertificateManager) ListCertificates() (map[string]*Certificate, error) {
+	cm.mu.RLock()
+	defer cm.mu.RUnlock()
+	
+	certificates := make(map[string]*Certificate)
+	
+	// Copy certificates from memory cache
+	for domain, cert := range cm.certificates {
+		certificates[domain] = cert
+	}
+	
+	cm.logger.Debug("Listed certificates", "count", len(certificates))
+	return certificates, nil
+}
+
+// GetCertificate retrieves a specific certificate by domain
+func (cm *CertificateManager) GetCertificate(domain string) (*Certificate, error) {
+	cm.mu.RLock()
+	defer cm.mu.RUnlock()
+	
+	cert, exists := cm.certificates[domain]
+	if !exists {
+		return nil, fmt.Errorf("certificate not found for domain: %s", domain)
+	}
+	
+	cm.logger.Debug("Retrieved certificate", "domain", domain)
+	return cert, nil
+}
+
+// DeleteCertificate removes a certificate from storage
+func (cm *CertificateManager) DeleteCertificate(domain string) error {
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
+	
+	// Check if certificate exists
+	if _, exists := cm.certificates[domain]; !exists {
+		return fmt.Errorf("certificate not found for domain: %s", domain)
+	}
+	
+	// Remove from memory cache
+	delete(cm.certificates, domain)
+	
+	// Remove certificate file if it exists
+	certPath := filepath.Join(cm.certDir, fmt.Sprintf("%s.pem", domain))
+	if err := os.Remove(certPath); err != nil && !os.IsNotExist(err) {
+		cm.logger.Error("Failed to remove certificate file", "error", err, "path", certPath)
+		// Don't return error as memory cleanup was successful
+	}
+	
+	// Remove private key file if it exists
+	keyPath := filepath.Join(cm.certDir, fmt.Sprintf("%s.key", domain))
+	if err := os.Remove(keyPath); err != nil && !os.IsNotExist(err) {
+		cm.logger.Error("Failed to remove private key file", "error", err, "path", keyPath)
+		// Don't return error as memory cleanup was successful
+	}
+	
+	cm.logger.Info("Certificate deleted", "domain", domain)
+	return nil
+}
+
+// GenerateCertificateFromCSR generates a new certificate from a Certificate Signing Request
+func (cm *CertificateManager) GenerateCertificateFromCSR(csr *x509.CertificateRequest) (*Certificate, error) {
+	if len(csr.DNSNames) == 0 && csr.Subject.CommonName == "" {
+		return nil, fmt.Errorf("CSR must contain at least one DNS name or common name")
+	}
+
+	// Use the first DNS name or common name as the domain
+	domain := csr.Subject.CommonName
+	if len(csr.DNSNames) > 0 {
+		domain = csr.DNSNames[0]
+	}
+
+	cm.caManager.logger.Info("Generating certificate from CSR", "domain", domain)
+
+	// Get CA certificate and private key
+	caCert, err := cm.caManager.GetCACertificate()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get CA certificate: %w", err)
+	}
+
+	// Generate a random serial number
+	serialNumber, err := rand.Int(rand.Reader, big.NewInt(1000000000))
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate serial number: %w", err)
+	}
+
+	// Construct base URLs for CRL and OCSP
+	baseURL := fmt.Sprintf("http://localhost:%d", cm.config.HTTPPort)
+
+	// Create certificate template based on CSR
+	template := x509.Certificate{
+		SerialNumber: serialNumber,
+		Subject:      csr.Subject,
+		DNSNames:     csr.DNSNames,
+		NotBefore:    time.Now(),
+		NotAfter:     time.Now().Add(cm.caManager.config.IndividualCertTTL),
+		KeyUsage:     x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth},
+		SignatureAlgorithm: x509.ECDSAWithSHA256,
+		
+		// Add CRL Distribution Points for certificate revocation checking
+		CRLDistributionPoints: []string{
+			baseURL + "/crl/myencrypt.crl",
+		},
+		
+		// Add OCSP Server for online certificate status checking
+		OCSPServer: []string{
+			baseURL + "/ocsp",
+		},
+		
+		// Add CA Issuers URI for certificate chain building
+		IssuingCertificateURL: []string{
+			baseURL + "/ca.crt",
+		},
+	}
+
+	// Add domain to certificate template
+	if err := cm.addDomainToTemplate(&template, domain); err != nil {
+		return nil, fmt.Errorf("failed to add domain to certificate: %w", err)
+	}
+
+	// Create certificate using the CSR's public key
+	certDER, err := x509.CreateCertificate(rand.Reader, &template, caCert.Certificate, csr.PublicKey, caCert.PrivateKey)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create certificate: %w", err)
+	}
+
+	// Parse the certificate
+	cert, err := x509.ParseCertificate(certDER)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse certificate: %w", err)
+	}
+
+	cm.caManager.logger.Info("Certificate generated successfully from CSR", 
+		"domain", domain, 
+		"serial", cert.SerialNumber, 
+		"valid_until", cert.NotAfter)
+
+	// Note: We don't have the private key since it was generated by the client
+	// The client will use their own private key with this certificate
+	return &Certificate{
+		Certificate: cert,
+		PrivateKey:  nil, // Client keeps their private key
+		Domain:      domain,
+		CertPEM:     pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certDER}),
+		KeyPEM:      nil, // No private key PEM since client keeps it
+		ValidFrom:   cert.NotBefore,
+		ValidUntil:  cert.NotAfter,
+		CreatedAt:   time.Now(),
+	}, nil
 }

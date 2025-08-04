@@ -200,17 +200,28 @@ func (ca *CAManager) generateCACertificate() (*CACertificate, error) {
 		return nil, fmt.Errorf("failed to generate ECDSA private key: %w", err)
 	}
 
+	// Get project name for Docker mode
+	projectName := os.Getenv("MYENCRYPT_PROJECT_NAME")
+	var caName string
+	if projectName != "" {
+		// Docker mode: include project name
+		caName = fmt.Sprintf("MyEncrypt Development CA (%s)", projectName)
+	} else {
+		// Service mode: use default name
+		caName = "MyEncrypt Development CA"
+	}
+
 	// Create certificate template
 	template := x509.Certificate{
 		SerialNumber: big.NewInt(1),
 		Subject: pkix.Name{
-			Organization:  []string{"MyEncrypt Development CA"},
+			Organization:  []string{caName},
 			Country:       []string{"US"},
 			Province:      []string{""},
 			Locality:      []string{""},
 			StreetAddress: []string{""},
 			PostalCode:    []string{""},
-			CommonName:    "MyEncrypt Development CA",
+			CommonName:    caName,
 		},
 		NotBefore:             time.Now(),
 		NotAfter:              time.Now().Add(ca.config.CACertTTL),

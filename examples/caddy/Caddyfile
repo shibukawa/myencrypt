@@ -1,0 +1,55 @@
+# Caddy configuration for MyEncrypt ACME demo
+
+# Global options
+{
+	# Use MyEncrypt ACME server
+	acme_ca http://myencrypt:80/acme/directory
+	
+	# Email for ACME registration (optional for local development)
+	email admin@example.com
+	
+	# Enable debug logging
+	debug
+}
+
+# Shared HTTP app proxied with HTTPS via Caddy
+app.localhost {
+	reverse_proxy simple-http-app:8080
+	
+	# Add some headers to show it's proxied by Caddy
+	header {
+		X-Served-By "Caddy with MyEncrypt"
+		X-Protocol "HTTPS"
+		X-Proxy "Caddy"
+	}
+	
+	# Enable access logging
+	log {
+		output stdout
+		format console
+	}
+}
+
+# API endpoint (same app, different subdomain)
+api.localhost {
+	reverse_proxy simple-http-app:8080
+	
+	# Add API-specific headers
+	header {
+		X-Served-By "Caddy with MyEncrypt"
+		X-Protocol "HTTPS"
+		X-Proxy "Caddy"
+		X-Service-Type "API"
+	}
+	
+	# Enable access logging
+	log {
+		output stdout
+		format console
+	}
+}
+
+# Health check endpoint for Caddy itself
+:8084 {
+	respond /health "OK" 200
+}

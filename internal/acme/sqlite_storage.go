@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"time"
 
@@ -14,13 +15,19 @@ import (
 
 // SQLiteStorage implements Storage interface using SQLite
 type SQLiteStorage struct {
-	db     *sql.DB
-	logger *logger.Logger
+	db      *sql.DB
+	logger  *logger.Logger
+	baseURL string
 }
 
 // NewSQLiteStorage creates a new SQLite-based storage
-func NewSQLiteStorage(cfg *config.Config, log *logger.Logger) (*SQLiteStorage, error) {
-	dbPath := filepath.Join(cfg.CertStorePath, "myencrypt.db")
+func NewSQLiteStorage(cfg *config.Config, log *logger.Logger, baseURL string) (*SQLiteStorage, error) {
+	dbPath := cfg.GetDatabasePath()
+	
+	// Ensure the directory exists
+	if err := os.MkdirAll(filepath.Dir(dbPath), 0755); err != nil {
+		return nil, fmt.Errorf("failed to create database directory: %w", err)
+	}
 	
 	db, err := sql.Open("sqlite3", dbPath)
 	if err != nil {
@@ -28,8 +35,9 @@ func NewSQLiteStorage(cfg *config.Config, log *logger.Logger) (*SQLiteStorage, e
 	}
 	
 	storage := &SQLiteStorage{
-		db:     db,
-		logger: log.WithComponent("sqlite-storage"),
+		db:      db,
+		logger:  log.WithComponent("sqlite-storage"),
+		baseURL: baseURL,
 	}
 	
 	if err := storage.initDatabase(); err != nil {
@@ -65,6 +73,7 @@ func (s *SQLiteStorage) initDatabase() error {
 		not_after DATETIME,
 		expires_at DATETIME NOT NULL,
 		certificate_url TEXT,
+		finalize_url TEXT,
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 		FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE
@@ -134,7 +143,38 @@ func (s *SQLiteStorage) initDatabase() error {
 	`
 	
 	_, err := s.db.Exec(schema)
-	return err
+	if err != nil {
+		return err
+	}
+	
+	// Run migrations
+	return s.runMigrations()
+}
+
+// runMigrations handles database schema migrations
+func (s *SQLiteStorage) runMigrations() error {
+	// Check if finalize_url column exists in orders table
+	var columnExists bool
+	err := s.db.QueryRow(`
+		SELECT COUNT(*) > 0 
+		FROM pragma_table_info('orders') 
+		WHERE name = 'finalize_url'
+	`).Scan(&columnExists)
+	
+	if err != nil {
+		return fmt.Errorf("failed to check finalize_url column: %w", err)
+	}
+	
+	// Add finalize_url column if it doesn't exist
+	if !columnExists {
+		s.logger.Info("Adding finalize_url column to orders table")
+		_, err = s.db.Exec(`ALTER TABLE orders ADD COLUMN finalize_url TEXT`)
+		if err != nil {
+			return fmt.Errorf("failed to add finalize_url column: %w", err)
+		}
+	}
+	
+	return nil
 }
 
 // Account operations
@@ -204,12 +244,12 @@ func (s *SQLiteStorage) StoreOrder(orderID string, order *ServerOrder) error {
 	domainsJSON, _ := json.Marshal(order.Identifiers)
 	
 	query := `
-		INSERT OR REPLACE INTO orders (id, account_id, status, domains, not_before, not_after, expires_at, certificate_url, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+		INSERT OR REPLACE INTO orders (id, account_id, status, domains, not_before, not_after, expires_at, certificate_url, finalize_url, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
 	`
 	
 	_, err := s.db.Exec(query, orderID, order.AccountID, order.Status, string(domainsJSON), 
-		order.NotBefore, order.NotAfter, order.Expires, order.Certificate)
+		order.NotBefore, order.NotAfter, order.Expires, order.Certificate, order.Finalize)
 	
 	if err != nil {
 		s.logger.Error("Failed to store order", "order_id", orderID, "error", err)
@@ -221,7 +261,7 @@ func (s *SQLiteStorage) StoreOrder(orderID string, order *ServerOrder) error {
 }
 
 func (s *SQLiteStorage) GetOrder(orderID string) (*ServerOrder, error) {
-	query := `SELECT id, account_id, status, domains, not_before, not_after, expires_at, certificate_url FROM orders WHERE id = ?`
+	query := `SELECT id, account_id, status, domains, not_before, not_after, expires_at, certificate_url, finalize_url FROM orders WHERE id = ?`
 	
 	var order ServerOrder
 	var domainsJSON string
@@ -235,6 +275,7 @@ func (s *SQLiteStorage) GetOrder(orderID string) (*ServerOrder, error) {
 		&order.NotAfter,
 		&order.Expires,
 		&order.Certificate,
+		&order.Finalize,
 	)
 	
 	if err != nil {
@@ -335,6 +376,64 @@ func (s *SQLiteStorage) GetAuthorization(authzID string) (*ServerAuthorization, 
 	authz.Identifier = Identifier{Type: "dns", Value: domain}
 	authz.Wildcard = wildcard
 	
+	// Get challenges for this authorization
+	challengeQuery := `SELECT id, type, status, token, key_authorization, validated_at, error_detail, created_at, updated_at FROM challenges WHERE authorization_id = ?`
+	rows, err := s.db.Query(challengeQuery, authzID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get challenges: %w", err)
+	}
+	defer rows.Close()
+	
+	var challenges []Challenge
+	for rows.Next() {
+		var serverChallenge ServerChallenge
+		var keyAuth sql.NullString
+		var validatedAt sql.NullTime
+		var errorDetail sql.NullString
+		
+		err := rows.Scan(
+			&serverChallenge.ID,
+			&serverChallenge.Type,
+			&serverChallenge.Status,
+			&serverChallenge.Token,
+			&keyAuth,
+			&validatedAt,
+			&errorDetail,
+			&serverChallenge.CreatedAt,
+			&serverChallenge.UpdatedAt,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan challenge: %w", err)
+		}
+		
+		if keyAuth.Valid {
+			serverChallenge.KeyAuthorization = keyAuth.String
+		}
+		
+		if validatedAt.Valid {
+			serverChallenge.Validated = &validatedAt.Time
+		}
+		
+		if errorDetail.Valid && errorDetail.String != "" {
+			var problemDetails ProblemDetails
+			if err := json.Unmarshal([]byte(errorDetail.String), &problemDetails); err == nil {
+				serverChallenge.Error = &problemDetails
+			}
+		}
+		
+		// Convert ServerChallenge to Challenge for client response
+		challenge := serverChallenge.Challenge
+		// Set the URL using the server challenge ID
+		challenge.URL = fmt.Sprintf("%s/acme/chall/%s", s.baseURL, serverChallenge.ID)
+		challenges = append(challenges, challenge)
+	}
+	
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating challenges: %w", err)
+	}
+	
+	authz.Challenges = challenges
+	
 	return &authz, nil
 }
 
@@ -388,6 +487,9 @@ func (s *SQLiteStorage) GetChallenge(challengeID string) (*ServerChallenge, erro
 			s.logger.Warn("Failed to parse challenge error", "error", err)
 		}
 	}
+	
+	// Set the URL for the challenge
+	challenge.URL = fmt.Sprintf("%s/acme/chall/%s", s.baseURL, challenge.ID)
 	
 	return &challenge, nil
 }
