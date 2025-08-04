@@ -49,8 +49,7 @@ RUN --mount=type=cache,target=/go/pkg/mod/ \
     GOOS=$TARGETOS GOARCH=$TARGETARCH \
     go build -ldflags="-w -s -X main.version=${VERSION} -X main.commit=${COMMIT} -X main.date=${DATE}" \
     -o /bin/myencrypt ./cmd/myencrypt && \
-    echo "Build completed successfully" && \
-    file /bin/myencrypt
+    echo "Build completed successfully"
 
 ################################################################################
 # Runtime stage using distroless (CGO-enabled)
