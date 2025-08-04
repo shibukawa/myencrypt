@@ -82,7 +82,7 @@ jobs:
         
         # Build binary
         OUTPUT_NAME="myencrypt-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.suffix }}"
-        go build -ldflags="-w -s -X main.version=${GITHUB_REF#refs/tags/} -X main.commit=${GITHUB_SHA::8} -X main.date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" -o "${OUTPUT_NAME}" cmd/myencrypt/main.go
+        go build -ldflags="-w -s -X main.version=${GITHUB_REF#refs/tags/} -X main.commit=${GITHUB_SHA::8} -X main.date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" -o "${OUTPUT_NAME}" ./cmd/myencrypt
         
         # Create archive
         if [ "${{ matrix.goos }}" = "windows" ]; then

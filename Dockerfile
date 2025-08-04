@@ -29,9 +29,18 @@ ARG DATE=unknown
 # source code into the container.
 RUN --mount=type=cache,target=/go/pkg/mod/ \
     --mount=type=bind,target=. \
+    echo "Building MyEncrypt with:" && \
+    echo "  TARGETOS=${TARGETOS}" && \
+    echo "  TARGETARCH=${TARGETARCH}" && \
+    echo "  VERSION=${VERSION}" && \
+    echo "  COMMIT=${COMMIT}" && \
+    echo "  DATE=${DATE}" && \
+    ls -la cmd/myencrypt/ && \
     CGO_ENABLED=1 GOOS=$TARGETOS GOARCH=$TARGETARCH \
     go build -ldflags="-w -s -X main.version=${VERSION} -X main.commit=${COMMIT} -X main.date=${DATE}" \
-    -o /bin/myencrypt ./cmd/myencrypt
+    -o /bin/myencrypt ./cmd/myencrypt && \
+    echo "Build completed successfully" && \
+    ls -la /bin/myencrypt
 
 ################################################################################
 # Runtime stage using distroless (CGO-enabled)

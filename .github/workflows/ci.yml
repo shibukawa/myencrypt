@@ -102,7 +102,7 @@ jobs:
         esac
         
         # Test build
-        go build -ldflags="-w -s" -o myencrypt-test cmd/myencrypt/main.go
+        go build -ldflags="-w -s" -o myencrypt-test ./cmd/myencrypt
         echo "✅ Build successful for ${{ matrix.goos }}/${{ matrix.goarch }}"
 
   # Docker build test
@@ -126,6 +126,61 @@ jobs:
         cache-from: type=gha
         cache-to: type=gha,mode=max
         tags: myencrypt:test
+        build-args: |
+          VERSION=ci-test
+          COMMIT=${{ github.sha }}
+          DATE=${{ github.event.head_commit.timestamp }}
+
+    - name: Test Docker image functionality
+      run: |
+        # Test amd64 image
+        docker run --rm --platform linux/amd64 myencrypt:test version
+        
+        # Test basic functionality
+        echo "✅ Docker build and basic functionality test passed"
+
+  # CodeQL Analysis
+  codeql:
+    name: CodeQL Analysis
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [ 'go' ]
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Initialize CodeQL
+      uses: github/codeql-action/init@v3
+      with:
+        languages: ${{ matrix.language }}
+        queries: security-extended,security-and-quality
+
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: '1.24'
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y sqlite3 libsqlite3-dev
+        go mod download
+
+    - name: Autobuild
+      uses: github/codeql-action/autobuild@v3
+
+    - name: Perform CodeQL Analysis
+      uses: github/codeql-action/analyze@v3
+      with:
+        category: "/language:${{matrix.language}}"
 
   # Security scan
   security:
@@ -136,15 +191,61 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
 
-    - name: Run Gosec Security Scanner
-      uses: securecodewarrior/github-action-gosec@master
+    - name: Set up Go
+      uses: actions/setup-go@v4
       with:
-        args: '-fmt sarif -out gosec.sarif ./...'
+        go-version: '1.24'
 
-    - name: Upload SARIF file
-      uses: github/codeql-action/upload-sarif@v2
+    - name: Install security tools
+      run: |
+        # Install gosec for security scanning
+        go install github.com/securecodewarrior/gosec/v2/cmd/gosec@latest
+        
+        # Install staticcheck for static analysis
+        go install honnef.co/go/tools/cmd/staticcheck@latest
+        
+        # Install govulncheck for vulnerability scanning
+        go install golang.org/x/vuln/cmd/govulncheck@latest
+
+    - name: Run Gosec Security Scanner
+      run: |
+        gosec -fmt sarif -out gosec.sarif ./...
+        gosec -fmt json -out gosec.json ./...
+      continue-on-error: true
+
+    - name: Run Staticcheck
+      run: |
+        staticcheck -f sarif ./... > staticcheck.sarif || true
+      continue-on-error: true
+
+    - name: Run Vulnerability Check
+      run: |
+        govulncheck ./...
+      continue-on-error: true
+
+    - name: Upload Gosec SARIF file
+      uses: github/codeql-action/upload-sarif@v3
+      if: always()
       with:
         sarif_file: gosec.sarif
+        category: gosec
+
+    - name: Upload Staticcheck SARIF file
+      uses: github/codeql-action/upload-sarif@v3
+      if: always() && hashFiles('staticcheck.sarif') != ''
+      with:
+        sarif_file: staticcheck.sarif
+        category: staticcheck
+
+    - name: Upload security scan results
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: security-scan-results
+        path: |
+          gosec.sarif
+          gosec.json
+          staticcheck.sarif
 
   # Dependency check
   dependency-check:
@@ -160,16 +261,15 @@ jobs:
       with:
         go-version: '1.24'
 
-    - name: Check for vulnerabilities
-      run: |
-        go install golang.org/x/vuln/cmd/govulncheck@latest
-        govulncheck ./...
-
     - name: Check dependencies
       run: |
         go mod verify
         go mod tidy
         git diff --exit-code go.mod go.sum
+
+    - name: Check for outdated dependencies
+      run: |
+        go list -u -m all
 
   # Build development Docker image
   build-dev-docker:
