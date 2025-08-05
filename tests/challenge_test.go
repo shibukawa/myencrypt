@@ -5,6 +5,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -87,41 +88,33 @@ func TestHTTP01Challenge(t *testing.T) {
 		}
 		t.Logf("✅ HTTP-01 challenge found: %s", httpChallenge.URI)
 
-		// Create HTTP server to serve challenge response on port 80 (required for HTTP-01)
-		challengeServer := &http.Server{
-			Addr: ":80",
-			Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if strings.HasPrefix(r.URL.Path, "/.well-known/acme-challenge/") {
-					token := strings.TrimPrefix(r.URL.Path, "/.well-known/acme-challenge/")
-					if token == httpChallenge.Token {
-						// Generate key authorization
-						keyAuth, err := client.client.HTTP01ChallengeResponse(httpChallenge.Token)
-						if err != nil {
-							t.Logf("Failed to generate key authorization: %v", err)
-							http.Error(w, "Internal error", http.StatusInternalServerError)
-							return
-						}
-						w.Header().Set("Content-Type", "text/plain")
-						w.Write([]byte(keyAuth))
-						t.Logf("📋 Served challenge response: %s", keyAuth)
+		// Create HTTP server to serve challenge response using httptest (avoids port 80 permission issues)
+		challengeServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if strings.HasPrefix(r.URL.Path, "/.well-known/acme-challenge/") {
+				token := strings.TrimPrefix(r.URL.Path, "/.well-known/acme-challenge/")
+				if token == httpChallenge.Token {
+					// Generate key authorization
+					keyAuth, err := client.client.HTTP01ChallengeResponse(httpChallenge.Token)
+					if err != nil {
+						t.Logf("Failed to generate key authorization: %v", err)
+						http.Error(w, "Internal error", http.StatusInternalServerError)
 						return
 					}
+					w.Header().Set("Content-Type", "text/plain")
+					w.Write([]byte(keyAuth))
+					t.Logf("📋 Served challenge response: %s", keyAuth)
+					return
 				}
-				http.NotFound(w, r)
-			}),
-		}
-
-		// Start challenge server
-		go func() {
-			if err := challengeServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-				t.Logf("Challenge server error (this is expected if port 80 is in use): %v", err)
 			}
-		}()
-		defer challengeServer.Shutdown(context.Background())
+			http.NotFound(w, r)
+		}))
+		defer challengeServer.Close()
 
-		// Wait for server to start
-		time.Sleep(100 * time.Millisecond)
-		t.Logf("📋 Challenge server started on port 80")
+		// Set test environment variable to redirect HTTP-01 validation to our test server
+		os.Setenv("MYENCRYPT_TEST_HTTP01_BASE_URL", challengeServer.URL)
+		defer os.Unsetenv("MYENCRYPT_TEST_HTTP01_BASE_URL")
+
+		t.Logf("📋 Challenge server started on %s", challengeServer.URL)
 
 		// Accept challenge
 		_, err = client.client.Accept(ctx, httpChallenge)

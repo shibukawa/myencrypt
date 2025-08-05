@@ -410,7 +410,15 @@ func (s *Server) validateHTTP01Challenge(challenge *ServerChallenge, authz *Serv
 	expectedKeyAuth := challenge.KeyAuthorization
 	
 	// Construct the validation URL
-	validationURL := fmt.Sprintf("http://%s/.well-known/acme-challenge/%s", domain, token)
+	// In test environment, allow custom base URL for HTTP-01 challenges
+	var validationURL string
+	if testBaseURL := os.Getenv("MYENCRYPT_TEST_HTTP01_BASE_URL"); testBaseURL != "" {
+		// Test environment: use custom base URL
+		validationURL = fmt.Sprintf("%s/.well-known/acme-challenge/%s", testBaseURL, token)
+	} else {
+		// Production environment: use standard HTTP-01 URL
+		validationURL = fmt.Sprintf("http://%s/.well-known/acme-challenge/%s", domain, token)
+	}
 	
 	s.logger.Debug("Validating HTTP-01 challenge", 
 		"url", validationURL, 
