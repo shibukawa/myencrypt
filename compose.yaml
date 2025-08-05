@@ -9,7 +9,7 @@ services:
       - MYENCRYPT_PROJECT_NAME=myencrypt  # Required: Project name for Docker mode
       - MYENCRYPT_INDIVIDUAL_CERT_TTL=168h  # 7 days (7 * 24h)
       - MYENCRYPT_CA_CERT_TTL=19200h
-      - MYENCRYPT_ALLOWED_DOMAINS=localhost,*.localhost,*.test,*.example,*.invalid,app.localhost,api.localhost,traefik.localhost,caddy.localhost,autocert.localhost,nginx.localhost
+      - MYENCRYPT_ALLOWED_DOMAINS=localhost,*.localhost,*.test,*.example,*.invalid,app.localhost
       - MYENCRYPT_CERT_STORE_PATH=/data
       - MYENCRYPT_DATABASE_PATH=/data/myencrypt.db
       - MYENCRYPT_LOG_LEVEL=debug  # Enable debug logging
@@ -20,8 +20,8 @@ services:
   # Demo App 1: Autocert (direct HTTPS)
   autocert.localhost:
     build:
-      context: .
-      dockerfile: ./examples/autocert-app/Dockerfile
+      context: ./examples/autocert-app
+      dockerfile: Dockerfile
     ports:
       - "8443:443"  # Map host port 8443 to container port 443 for TLS-ALPN challenge
     environment:
@@ -42,7 +42,7 @@ services:
       dockerfile: Dockerfile
     environment:
       - APP_NAME=Shared HTTP App
-      - PORT=8080
+      - PORT=80
     restart: unless-stopped
     labels:
       # Traefik labels for this shared app
@@ -51,7 +51,7 @@ services:
       - "traefik.http.routers.app.entrypoints=websecure"
       - "traefik.http.routers.app.tls.certresolver=myencrypt"
       - "traefik.http.routers.app.middlewares=security-headers"
-      - "traefik.http.services.app.loadbalancer.server.port=8080"
+      - "traefik.http.services.app.loadbalancer.server.port=80"
 
   # Caddy Reverse Proxy
   caddy:
@@ -84,10 +84,6 @@ services:
     depends_on:
       - myencrypt
       - simple-http-app
-    networks:
-      default:
-        aliases:
-          - app.localhost  # Alias for the proxied app
     restart: unless-stopped
     labels:
       # Traefik dashboard
@@ -113,17 +109,9 @@ services:
       - myencrypt
       - simple-http-app
     restart: unless-stopped
-    networks:
-      default:
-        aliases:
-          - nginx.localhost  # Ensure domain resolution within Docker network
     labels:
       # Traefik labels (if needed for integration)
       - "traefik.enable=false"  # Disable Traefik for this service
-
-networks:
-  default:
-    name: myencrypt_demo_network
 
 volumes:
   myencrypt_data:

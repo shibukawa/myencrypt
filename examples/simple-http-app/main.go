@@ -89,9 +89,9 @@ func main() {
 	// Create HTTP handler
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		tmpl := template.Must(template.New("page").Parse(htmlTemplate))
-		
+
 		// Get some request headers for display
-		headers := fmt.Sprintf("Host: %s, User-Agent: %s, X-Forwarded-For: %s", 
+		headers := fmt.Sprintf("Host: %s, User-Agent: %s, X-Forwarded-For: %s",
 			r.Header.Get("Host"),
 			r.Header.Get("User-Agent")[:min(50, len(r.Header.Get("User-Agent")))],
 			r.Header.Get("X-Forwarded-For"))
@@ -112,7 +112,7 @@ func main() {
 	// Health check endpoint
 	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprintf(w, `{"status":"healthy","app":"%s","time":"%s"}`, 
+		fmt.Fprintf(w, `{"status":"healthy","app":"%s","time":"%s"}`,
 			appName, time.Now().Format(time.RFC3339))
 	})
 
@@ -129,7 +129,7 @@ func main() {
 				"user_agent": "%s",
 				"x_forwarded_for": "%s"
 			}
-		}`, 
+		}`,
 			appName, port, time.Now().Format(time.RFC3339),
 			r.Header.Get("Host"),
 			r.Header.Get("User-Agent"),
@@ -138,7 +138,7 @@ func main() {
 
 	log.Printf("Starting HTTP server on port %s", port)
 	log.Printf("Visit: http://localhost:%s", port)
-	
+
 	// Start HTTP server
 	if err := http.ListenAndServe(":"+port, nil); err != nil {
 		log.Fatalf("HTTP server failed: %v", err)

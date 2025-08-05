@@ -32,7 +32,7 @@ app.localhost {
 
 # API endpoint (same app, different subdomain)
 api.localhost {
-	reverse_proxy simple-http-app:8080
+	reverse_proxy simple-http-app:80
 	
 	# Add API-specific headers
 	header {
