@@ -13,19 +13,23 @@ jobs:
 
   build-binaries:
     name: Build Binaries
-    runs-on: ubuntu-latest
     
     strategy:
       matrix:
         include:
-          - goos: windows
+          - os: windows-latest
+            goos: windows
             goarch: amd64
-          - goos: darwin
+          - os: macos-latest
+            goos: darwin
             goarch: arm64
-          - goos: linux
+          - os: ubuntu-latest
+            goos: linux
             goarch: amd64
-          - goos: linux
+          - os: ubuntu-latest
+            goos: linux
             goarch: arm64
+    runs-on: ${{ matrix.os }}
     
     steps:
     - name: Checkout code
@@ -34,7 +38,7 @@ jobs:
     - name: Set up Go
       uses: actions/setup-go@v5
       with:
-        go-version: '1.24'
+        go-version: stable
 
     - name: Install dependencies (Linux)
       if: runner.os == 'linux'
