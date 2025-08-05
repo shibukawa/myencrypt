@@ -4,6 +4,13 @@ ARG GO_VERSION=1.24.5
 FROM --platform=$BUILDPLATFORM golang:${GO_VERSION} AS build
 WORKDIR /src
 
+# Install build dependencies for CGO/SQLite
+RUN apt-get update && apt-get install -y \
+    gcc \
+    libc6-dev \
+    sqlite3 \
+    && rm -rf /var/lib/apt/lists/*
+
 RUN --mount=type=cache,target=/go/pkg/mod/ \
     --mount=type=bind,source=go.sum,target=go.sum \
     --mount=type=bind,source=go.mod,target=go.mod \
@@ -14,9 +21,16 @@ ARG VERSION=latest
 
 RUN --mount=type=cache,target=/go/pkg/mod/ \
     --mount=type=bind,target=. \
-    CGO_ENABLED=0 GOARCH=$TARGETARCH go build -ldflags '-w -s -X "main.Version=${VERSION}"' -o /bin/myencrypt ./cmd/myencrypt
+    CGO_ENABLED=1 GOARCH=$TARGETARCH go build -ldflags '-w -s -X "main.Version=${VERSION}"' -o /bin/myencrypt ./cmd/myencrypt
 
-FROM gcr.io/distroless/static-debian12 AS final
+# Use base image with libc for CGO support
+FROM debian:12-slim AS final
+
+# Install runtime dependencies
+RUN apt-get update && apt-get install -y \
+    ca-certificates \
+    sqlite3 \
+    && rm -rf /var/lib/apt/lists/*
 
 ENV MYENCRYPT_EXPOSE_PORT=14000 \
     MYENCRYPT_PROJECT_NAME=myencrypt \

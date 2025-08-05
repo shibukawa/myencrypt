@@ -69,6 +69,10 @@ services:
       - myencrypt
       - simple-http-app
     restart: unless-stopped
+    networks:
+      default:
+        aliases:
+          - app-traefik.localhost  # Allow MyEncrypt to resolve this hostname
     labels:
       # Traefik dashboard
       - "traefik.enable=true"
