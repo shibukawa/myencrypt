@@ -597,7 +597,7 @@ var Version = "latest"
 
 // handleVersionCommand handles version display
 func handleVersionCommand() error {
-	fmt.Println("MyEncrypt v" + Version)
+	fmt.Println("MyEncrypt " + Version)
 	return nil
 }
 

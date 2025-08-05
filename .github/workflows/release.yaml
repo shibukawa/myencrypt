@@ -56,17 +56,6 @@ jobs:
         run: |
           brew install gcc
 
-      - name: Get version
-        id: version
-        shell: bash
-        run: |
-          if [[ $GITHUB_REF == refs/tags/* ]]; then
-            VERSION=${GITHUB_REF#refs/tags/}
-          else
-            VERSION="dev-$(git rev-parse --short HEAD)"
-          fi
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-
       - name: Build (Linux/macOS)
         if: runner.os != 'Windows'
         env:
@@ -75,7 +64,7 @@ jobs:
           GOARCH: ${{ matrix.goarch }}
         run: |
           go build \
-            -ldflags "-w -s -X 'main.Version=${{ steps.version.outputs.version }}'" \
+            -ldflags "-w -s -X 'main.Version=${{ github.ref_name }}'" \
             -o "myencrypt-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }}" \
             ./cmd/myencrypt
 
@@ -88,7 +77,7 @@ jobs:
         shell: msys2 {0}
         run: |
           go build \
-            -ldflags "-w -s -X 'main.Version=${{ steps.version.outputs.version }}'" \
+            -ldflags "-w -s -X 'main.Version=${{ github.ref_name }}'" \
             -o "myencrypt-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }}" \
             ./cmd/myencrypt
 
@@ -97,9 +86,9 @@ jobs:
         run: |
           BINARY_NAME="myencrypt-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }}"
           if [[ "${{ runner.os }}" == "Windows" ]]; then
-            ./$BINARY_NAME --version || echo "Version check completed"
+            ./$BINARY_NAME version || echo "Version check completed"
           else
-            ./$BINARY_NAME --version
+            ./$BINARY_NAME version
           fi
 
       - name: Create archive
