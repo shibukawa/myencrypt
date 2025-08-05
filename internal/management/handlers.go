@@ -918,7 +918,7 @@ catch {
     Write-Host "❌ Installation failed: $_" -ForegroundColor Red
     exit 1
 }
-`, scriptPort, scriptPort, scriptPort)
+`, scriptPort, scriptPort, scriptPort, scriptPort)
 	
 	w.Header().Set("Content-Type", "text/plain")
 	w.Header().Set("Content-Disposition", "attachment; filename=\"install.ps1\"")

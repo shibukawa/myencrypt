@@ -81,7 +81,7 @@ func TestChallengeValidationFlow(t *testing.T) {
 			challenge, err := client.client.GetChallenge(ctx, httpChallenge.URI)
 			if err != nil {
 				t.Logf("Failed to get challenge status: %v", err)
-				time.Sleep(2 * time.Second)
+				time.Sleep(200 * time.Millisecond) // Reduced from 2s to 200ms
 				continue
 			}
 
@@ -96,7 +96,7 @@ func TestChallengeValidationFlow(t *testing.T) {
 				break
 			}
 
-			time.Sleep(2 * time.Second)
+			time.Sleep(200 * time.Millisecond) // Reduced from 2s to 200ms
 		}
 
 		// Verify that challenge validation was attempted
@@ -196,7 +196,7 @@ func TestChallengeValidationComponents(t *testing.T) {
 		}
 
 		// Wait a bit for processing
-		time.Sleep(2 * time.Second)
+		time.Sleep(200 * time.Millisecond) // Reduced from 2s to 200ms
 
 		// Get updated challenge
 		updatedChallenge, err := client.client.GetChallenge(ctx, httpChallenge.URI)
@@ -216,7 +216,7 @@ func TestChallengeValidationComponents(t *testing.T) {
 
 	t.Run("DatabasePersistence", func(t *testing.T) {
 		// Wait a bit for all operations to complete
-		time.Sleep(2 * time.Second)
+		time.Sleep(200 * time.Millisecond) // Reduced from 2s to 200ms
 
 		// Check database persistence
 		stats, err := server.GetDatabaseStats()

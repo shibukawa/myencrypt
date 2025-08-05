@@ -89,7 +89,7 @@ func NewRenewalManager(certManager Manager, logger logger.Logger, config Renewal
 }
 
 // Start begins the automatic renewal process
-func (rm *RenewalManager) Start() error {
+func (rm *RenewalManager) Start(ctx context.Context) error {
 	rm.mu.Lock()
 	defer rm.mu.Unlock()
 	
@@ -97,6 +97,11 @@ func (rm *RenewalManager) Start() error {
 		"check_interval", rm.checkInterval,
 		"renewal_threshold", rm.renewalThreshold,
 		"max_retries", rm.maxRetries)
+	
+	// Create a new context that can be cancelled
+	renewalCtx, cancel := context.WithCancel(ctx)
+	rm.ctx = renewalCtx
+	rm.cancel = cancel
 	
 	rm.wg.Add(1)
 	go rm.renewalLoop()
@@ -221,11 +226,16 @@ func (rm *RenewalManager) queueRenewal(domain string, cert *Certificate) bool {
 
 // processRenewalQueue processes all pending renewal tasks
 func (rm *RenewalManager) processRenewalQueue() {
+	rm.logger.Debug("processRenewalQueue - START")
 	now := time.Now()
 	
+	rm.logger.Debug("Processing renewal queue", "queue_size", len(rm.renewalQueue))
 	for domain, task := range rm.renewalQueue {
+		rm.logger.Debug("Processing renewal task", "domain", domain, "attempts", task.Attempts)
+		
 		// Check if it's time to attempt renewal
 		if now.Before(task.NextAttempt) {
+			rm.logger.Debug("Not time for renewal yet", "domain", domain, "next_attempt", task.NextAttempt)
 			continue
 		}
 		
@@ -253,7 +263,10 @@ func (rm *RenewalManager) processRenewalQueue() {
 			"attempt", task.Attempts+1,
 			"max_attempts", rm.maxRetries)
 		
+		rm.logger.Debug("Calling renewCertificate", "domain", domain)
 		err := rm.renewCertificate(domain, task)
+		rm.logger.Debug("renewCertificate returned", "domain", domain, "error", err)
+		
 		task.Attempts++
 		task.UpdatedAt = now
 		
@@ -283,24 +296,31 @@ func (rm *RenewalManager) processRenewalQueue() {
 
 // renewCertificate performs the actual certificate renewal
 func (rm *RenewalManager) renewCertificate(domain string, task *RenewalTask) error {
-	rm.logger.Debug("Renewing certificate", "domain", domain)
+	rm.logger.Debug("renewCertificate - START", "domain", domain)
 	
 	// Generate new certificate
+	rm.logger.Debug("Generating new certificate", "domain", domain)
 	newCert, err := rm.certManager.GenerateCertificate(domain)
 	if err != nil {
+		rm.logger.Debug("Failed to generate certificate", "domain", domain, "error", err)
 		return fmt.Errorf("failed to generate new certificate: %w", err)
 	}
+	rm.logger.Debug("Certificate generated successfully", "domain", domain)
 	
 	// Validate the new certificate
+	rm.logger.Debug("Validating new certificate", "domain", domain)
 	if err := rm.certManager.ValidateCertificate(newCert); err != nil {
+		rm.logger.Debug("Certificate validation failed", "domain", domain, "error", err)
 		return fmt.Errorf("new certificate validation failed: %w", err)
 	}
+	rm.logger.Debug("Certificate validated successfully", "domain", domain)
 	
 	rm.logger.Info("Certificate renewed successfully",
 		"domain", domain,
 		"expires_at", newCert.Certificate.NotAfter,
 		"valid_for", time.Until(newCert.Certificate.NotAfter))
 	
+	rm.logger.Debug("renewCertificate - END", "domain", domain)
 	return nil
 }
 

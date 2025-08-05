@@ -29,14 +29,14 @@ func TestCertificateRenewal(t *testing.T) {
 		)
 		
 		// Start renewal manager
-		err := renewalManager.Start()
+		err := renewalManager.Start(context.Background())
 		if err != nil {
 			t.Fatalf("Failed to start renewal manager: %v", err)
 		}
 		t.Log("✅ Renewal manager started")
 		
 		// Let it run for a few seconds
-		time.Sleep(3 * time.Second)
+		time.Sleep(300 * time.Millisecond) // Reduced from 3s to 300ms (1/10)
 		
 		// Stop renewal manager
 		err = renewalManager.Stop()
@@ -56,14 +56,14 @@ func TestCertificateRenewal(t *testing.T) {
 			renewalConfig,
 		)
 		
-		err := renewalManager.Start()
+		err := renewalManager.Start(context.Background())
 		if err != nil {
 			t.Fatalf("Failed to start renewal manager: %v", err)
 		}
 		defer renewalManager.Stop()
 		
 		// Wait for some checks
-		time.Sleep(2 * time.Second)
+		time.Sleep(200 * time.Millisecond) // Reduced from 2s to 200ms (1/10)
 		
 		// Get renewal stats
 		stats := renewalManager.GetRenewalStats()
@@ -90,7 +90,7 @@ func TestCertificateRenewal(t *testing.T) {
 			renewalConfig,
 		)
 		
-		err := renewalManager.Start()
+		err := renewalManager.Start(context.Background())
 		if err != nil {
 			t.Fatalf("Failed to start renewal manager: %v", err)
 		}
@@ -159,13 +159,13 @@ func TestRenewalConfiguration(t *testing.T) {
 			config,
 		)
 		
-		err := renewalManager.Start()
+		err := renewalManager.Start(context.Background())
 		if err != nil {
 			t.Fatalf("Failed to start renewal manager with custom config: %v", err)
 		}
 		
 		// Let it run briefly
-		time.Sleep(1 * time.Second)
+		time.Sleep(100 * time.Millisecond) // Reduced from 1s to 100ms (1/10)
 		
 		err = renewalManager.Stop()
 		if err != nil {
@@ -242,14 +242,14 @@ func TestRenewalErrorHandling(t *testing.T) {
 			renewalConfig,
 		)
 		
-		err := renewalManager.Start()
+		err := renewalManager.Start(context.Background())
 		if err != nil {
 			t.Fatalf("Failed to start renewal manager: %v", err)
 		}
 		defer renewalManager.Stop()
 		
 		// Let it run and encounter errors
-		time.Sleep(2 * time.Second)
+		time.Sleep(200 * time.Millisecond) // Reduced from 2s to 200ms (1/10)
 		
 		// Check error stats
 		stats := renewalManager.GetRenewalStats()
@@ -282,7 +282,7 @@ func TestRenewalMetrics(t *testing.T) {
 			renewalConfig,
 		)
 		
-		err := renewalManager.Start()
+		err := renewalManager.Start(context.Background())
 		if err != nil {
 			t.Fatalf("Failed to start renewal manager: %v", err)
 		}
@@ -293,7 +293,7 @@ func TestRenewalMetrics(t *testing.T) {
 		t.Logf("📊 Initial stats: %+v", initialStats)
 		
 		// Wait for some activity
-		time.Sleep(1 * time.Second)
+		time.Sleep(100 * time.Millisecond) // Reduced from 1s to 100ms (1/10)
 		
 		finalStats := renewalManager.GetRenewalStats()
 		t.Logf("📊 Final stats: %+v", finalStats)

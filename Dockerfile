@@ -19,9 +19,7 @@ RUN --mount=type=cache,target=/go/pkg/mod/ \
 # Build arguments for cross-compilation and version info
 ARG TARGETOS
 ARG TARGETARCH
-ARG VERSION=dev
-ARG COMMIT=unknown
-ARG DATE=unknown
+ARG VERSION=latest
 
 # Build the application.
 # Leverage a cache mount to /go/pkg/mod/ to speed up subsequent builds.
@@ -47,7 +45,7 @@ RUN --mount=type=cache,target=/go/pkg/mod/ \
     esac && \
     echo "Building for ${TARGETOS}/${TARGETARCH} with CC=${CC}" && \
     GOOS=$TARGETOS GOARCH=$TARGETARCH \
-    go build -ldflags="-w -s -X main.version=${VERSION} -X main.commit=${COMMIT} -X main.date=${DATE}" \
+    go build -ldflags="-w -s -X main.Version=${VERSION}" \
     -o /bin/myencrypt ./cmd/myencrypt && \
     echo "Build completed successfully"
 

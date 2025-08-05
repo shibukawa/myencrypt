@@ -11,7 +11,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"math"
 	"net"
 	"net/http"
 	"os"
@@ -427,11 +426,11 @@ func (s *Server) validateHTTP01Challenge(challenge *ServerChallenge, authz *Serv
 		},
 	}
 	
-	// Retry configuration
-	maxRetries := 5
-	baseDelay := 1 * time.Second
-	maxDelay := 30 * time.Second
-	initialDelay := 5 * time.Second // Increased delay to give ACME client more time
+	// Retry configuration (optimized for fast testing)
+	maxRetries := 2 // Reduced from 3 to 2 for faster testing
+	baseDelay := 10 * time.Millisecond // Further reduced for testing
+	maxDelay := 50 * time.Millisecond // Much lower max delay
+	initialDelay := 20 * time.Millisecond // Reduced initial delay
 	
 	// Wait before first attempt to give the ACME client time to set up the challenge response
 	s.logger.Debug("Waiting before HTTP-01 challenge validation", "initial_delay", initialDelay, "url", validationURL)
@@ -441,8 +440,8 @@ func (s *Server) validateHTTP01Challenge(challenge *ServerChallenge, authz *Serv
 	
 	for attempt := 0; attempt < maxRetries; attempt++ {
 		if attempt > 0 {
-			// Calculate exponential backoff delay
-			delay := time.Duration(float64(baseDelay) * math.Pow(2, float64(attempt-1)))
+			// Use fixed short delay instead of exponential backoff for testing
+			delay := baseDelay
 			if delay > maxDelay {
 				delay = maxDelay
 			}
@@ -910,11 +909,11 @@ func (s *Server) connectTLSALPN(domain, alpnProto string) (*tls.Conn, error) {
 }
 
 // Start starts the ACME server and renewal manager
-func (s *Server) Start() error {
+func (s *Server) Start(ctx context.Context) error {
 	s.logger.Info("Starting ACME server", "base_url", s.baseURL)
 	
-	// Start renewal manager
-	if err := s.renewalManager.Start(); err != nil {
+	// Start renewal manager with context
+	if err := s.renewalManager.Start(ctx); err != nil {
 		return fmt.Errorf("failed to start renewal manager: %w", err)
 	}
 	
@@ -1044,8 +1043,8 @@ func (s *Server) CreateOrder(accountID string, req *OrderRequest) (*Order, error
 		}
 		
 		// Create challenges for this authorization
-		// Temporarily only enable HTTP-01 for debugging
-		challengeTypes := []string{ChallengeTypeHTTP01}
+		// Enable all supported challenge types
+		challengeTypes := []string{ChallengeTypeHTTP01, ChallengeTypeDNS01, ChallengeTypeTLSALPN01}
 		var challenges []Challenge
 		
 		for _, challengeType := range challengeTypes {

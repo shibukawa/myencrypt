@@ -65,7 +65,7 @@ func (h *HTTPServer) Start(ctx context.Context) error {
 	h.logger.Info("Starting ACME HTTP server", "address", addr)
 	
 	// Start the ACME server
-	if err := h.acmeServer.Start(); err != nil {
+	if err := h.acmeServer.Start(ctx); err != nil {
 		return fmt.Errorf("failed to start ACME server: %w", err)
 	}
 	

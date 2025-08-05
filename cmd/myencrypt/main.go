@@ -574,21 +574,12 @@ func handleConfigHelpCommand() error {
 	return nil
 }
 
+// Version is set at build time via -ldflags
+var Version = "latest"
+
 // handleVersionCommand handles version display
 func handleVersionCommand() error {
-	info := GetVersionInfo()
-
-	fmt.Println(GetVersionString())
-	fmt.Println()
-	fmt.Printf("Version:    %s\n", info.Version)
-	fmt.Printf("Commit:     %s\n", info.Commit)
-	fmt.Printf("Built:      %s\n", info.Date)
-	fmt.Printf("Go version: %s\n", info.GoVersion)
-	fmt.Printf("Platform:   %s\n", info.Platform)
-	fmt.Println()
-	fmt.Println("MyEncrypt - Local ACME Certificate Authority")
-	fmt.Println("https://github.com/shibukawayoshiki/myencrypt2")
-
+	fmt.Println("MyEncrypt v" + Version)
 	return nil
 }
 

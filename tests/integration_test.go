@@ -14,6 +14,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	mathrand "math/rand"
 
 	"golang.org/x/crypto/acme"
 	_ "github.com/mattn/go-sqlite3"
@@ -120,22 +121,25 @@ func (ts *TestServer) Start(t *testing.T) {
 		}
 	}()
 
-	// Start ACME server background tasks
+	// Start ACME server background tasks with context
 	ts.wg.Add(1)
 	go func() {
 		defer ts.wg.Done()
-		if err := ts.ACMEServer.Start(); err != nil {
+		if err := ts.ACMEServer.Start(ts.ctx); err != nil {
 			t.Errorf("ACME server error: %v", err)
 		}
 	}()
 
-	// Wait for server to start
-	time.Sleep(2 * time.Second)
-
-	// Verify server is running
-	if !ts.isHealthy() {
-		t.Fatal("Server failed to start properly")
+	// Wait for server to start with timeout
+	startTime := time.Now()
+	for time.Since(startTime) < 10*time.Second {
+		if ts.isHealthy() {
+			return // Server started successfully
+		}
+		time.Sleep(100 * time.Millisecond)
 	}
+	
+	t.Fatal("Server failed to start within timeout")
 }
 
 // Stop stops the test server and cleans up
@@ -177,6 +181,42 @@ func (ts *TestServer) isHealthy() bool {
 	}
 	defer resp.Body.Close()
 	return resp.StatusCode == http.StatusOK
+}
+
+// generateUniqueEmail generates a unique email for each test
+func generateUniqueEmail(testName string) string {
+	timestamp := time.Now().UnixNano()
+	random := mathrand.Intn(10000)
+	return fmt.Sprintf("test-%s-%d-%d@example.com", testName, timestamp, random)
+}
+
+// createUniqueACMEClient creates an ACME client with unique account for each test
+func createUniqueACMEClient(t *testing.T, directoryURL, testName string) *acme.Client {
+	// Generate unique private key for each test
+	privateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("Failed to generate private key: %v", err)
+	}
+
+	client := &acme.Client{
+		Key:          privateKey,
+		DirectoryURL: directoryURL,
+	}
+
+	// Register unique account
+	uniqueEmail := generateUniqueEmail(testName)
+	account := &acme.Account{
+		Contact: []string{"mailto:" + uniqueEmail},
+	}
+
+	ctx := context.Background()
+	_, err = client.Register(ctx, account, acme.AcceptTOS)
+	if err != nil {
+		t.Fatalf("Failed to register account with %s: %v", uniqueEmail, err)
+	}
+
+	t.Logf("✅ Registered unique account: %s", uniqueEmail)
+	return client
 }
 
 // GetDatabaseStats returns database statistics
@@ -239,8 +279,10 @@ func NewACMEClient(port int) (*ACMEClient, error) {
 
 // RegisterAccount registers an ACME account
 func (ac *ACMEClient) RegisterAccount(ctx context.Context) (*acme.Account, error) {
+	// Generate unique email for this test instance
+	uniqueEmail := generateUniqueEmail("acme-client")
 	account := &acme.Account{
-		Contact: []string{"mailto:test@example.com"},
+		Contact: []string{"mailto:" + uniqueEmail},
 	}
 	
 	return ac.client.Register(ctx, account, acme.AcceptTOS)
@@ -346,7 +388,7 @@ func TestIntegration(t *testing.T) {
 
 	t.Run("DatabaseVerification", func(t *testing.T) {
 		// Wait for database writes
-		time.Sleep(2 * time.Second)
+		time.Sleep(200 * time.Millisecond) // Reduced from 2s to 200ms (1/10)
 
 		stats, err := server.GetDatabaseStats()
 		if err != nil {
@@ -452,7 +494,7 @@ func TestConcurrentClients(t *testing.T) {
 	}
 
 	// Verify database has multiple accounts
-	time.Sleep(2 * time.Second)
+	time.Sleep(200 * time.Millisecond) // Reduced from 2s to 200ms (1/10)
 	stats, err := server.GetDatabaseStats()
 	if err != nil {
 		t.Fatalf("Failed to get database stats: %v", err)
