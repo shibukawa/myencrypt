@@ -20,7 +20,7 @@ func (s *Server) parseJWSRequest(r *http.Request) (*JWS, error) {
 			Detail: "Failed to read request body",
 		}
 	}
-	
+
 	var jws JWS
 	if err := json.Unmarshal(body, &jws); err != nil {
 		return nil, &ProblemDetails{
@@ -30,7 +30,7 @@ func (s *Server) parseJWSRequest(r *http.Request) (*JWS, error) {
 			Detail: "Invalid JWS format",
 		}
 	}
-	
+
 	// Decode and validate the payload
 	payloadBytes, err := base64.RawURLEncoding.DecodeString(jws.Payload)
 	if err != nil {
@@ -41,17 +41,17 @@ func (s *Server) parseJWSRequest(r *http.Request) (*JWS, error) {
 			Detail: "Invalid base64url encoding in payload",
 		}
 	}
-	
+
 	// Replace the payload with decoded content for easier processing
 	jws.Payload = string(payloadBytes)
-	
+
 	// Parse and set header
 	header, err := s.parseJWSHeader(jws.Protected)
 	if err != nil {
 		return nil, err
 	}
 	jws.Header = header
-	
+
 	return &jws, nil
 }
 
@@ -66,7 +66,7 @@ func (s *Server) parseJWSHeader(protected string) (*JWSHeader, error) {
 			Detail: "Invalid base64url encoding in protected header",
 		}
 	}
-	
+
 	var header JWSHeader
 	if err := json.Unmarshal(headerBytes, &header); err != nil {
 		return nil, &ProblemDetails{
@@ -76,7 +76,7 @@ func (s *Server) parseJWSHeader(protected string) (*JWSHeader, error) {
 			Detail: "Invalid JSON in protected header",
 		}
 	}
-	
+
 	// Validate nonce if present (relaxed for development)
 	if header.Nonce != "" {
 		if err := s.ValidateNonce(header.Nonce); err != nil {
@@ -84,7 +84,7 @@ func (s *Server) parseJWSHeader(protected string) (*JWSHeader, error) {
 			s.logger.Debug("Nonce validation failed (continuing for development)", "error", err)
 		}
 	}
-	
+
 	// Validate algorithm
 	if header.Alg == "" {
 		return nil, &ProblemDetails{
@@ -94,7 +94,7 @@ func (s *Server) parseJWSHeader(protected string) (*JWSHeader, error) {
 			Detail: "Missing algorithm in protected header",
 		}
 	}
-	
+
 	// Check for supported algorithms
 	if !s.isSupportedAlgorithm(header.Alg) {
 		return nil, &ProblemDetails{
@@ -104,7 +104,7 @@ func (s *Server) parseJWSHeader(protected string) (*JWSHeader, error) {
 			Detail: fmt.Sprintf("Algorithm %s is not supported", header.Alg),
 		}
 	}
-	
+
 	return &header, nil
 }
 
@@ -115,13 +115,13 @@ func (s *Server) isSupportedAlgorithm(alg string) bool {
 		"ES256", "ES384", "ES512",
 		"PS256", "PS384", "PS512",
 	}
-	
+
 	for _, supported := range supportedAlgorithms {
 		if alg == supported {
 			return true
 		}
 	}
-	
+
 	return false
 }
 
@@ -133,7 +133,7 @@ func (s *Server) validateJWSSignature(jws *JWS, header *JWSHeader) error {
 	// 1. Reconstruct the signing input (protected + "." + payload)
 	// 2. Verify the signature using the public key from JWK or account
 	// 3. Return appropriate error if verification fails
-	
+
 	s.logger.Debug("JWS signature validation skipped for development")
 	return nil
 }
@@ -157,7 +157,7 @@ func (s *Server) validateJWK(jwk *JSONWebKey) error {
 			Detail: "Missing JWK",
 		}
 	}
-	
+
 	// Validate key type
 	if jwk.Kty == "" {
 		return &ProblemDetails{
@@ -167,7 +167,7 @@ func (s *Server) validateJWK(jwk *JSONWebKey) error {
 			Detail: "Missing key type (kty) in JWK",
 		}
 	}
-	
+
 	// Validate based on key type
 	switch jwk.Kty {
 	case "RSA":
@@ -196,7 +196,7 @@ func (s *Server) validateJWK(jwk *JSONWebKey) error {
 			Detail: fmt.Sprintf("Unsupported key type: %s", jwk.Kty),
 		}
 	}
-	
+
 	return nil
 }
 
@@ -219,7 +219,7 @@ func (s *Server) parseJWSPayload(r *http.Request) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	
+
 	// The payload is already decoded in parseJWSRequest, so just return it as bytes
 	return []byte(jws.Payload), nil
 }

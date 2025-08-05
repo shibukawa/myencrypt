@@ -330,7 +330,7 @@ func TestChallengeTypeDetails(t *testing.T) {
 	t.Run("ChallengeTypeDocumentation", func(t *testing.T) {
 		t.Log("📋 Challenge Type Details:")
 		t.Log("")
-		
+
 		t.Log("🌐 HTTP-01 Challenge:")
 		t.Log("   - Places token at http://{domain}/.well-known/acme-challenge/{token}")
 		t.Log("   - Response: {token}.{JWK_thumbprint}")
@@ -338,7 +338,7 @@ func TestChallengeTypeDetails(t *testing.T) {
 		t.Log("   - Cannot issue wildcard certificates")
 		t.Log("   - Most widely supported")
 		t.Log("")
-		
+
 		t.Log("🔍 DNS-01 Challenge:")
 		t.Log("   - Creates TXT record: _acme-challenge.{domain}")
 		t.Log("   - Value: SHA256({token}.{JWK_thumbprint}) base64url encoded")
@@ -346,7 +346,7 @@ func TestChallengeTypeDetails(t *testing.T) {
 		t.Log("   - Requires DNS API access")
 		t.Log("   - No firewall issues")
 		t.Log("")
-		
+
 		t.Log("🔒 TLS-ALPN-01 Challenge:")
 		t.Log("   - Uses TLS connection with ALPN extension 'acme-tls/1'")
 		t.Log("   - Certificate contains ACME extension (1.3.6.1.5.5.7.1.31)")
@@ -354,7 +354,7 @@ func TestChallengeTypeDetails(t *testing.T) {
 		t.Log("   - Requires port 443 access")
 		t.Log("   - More complex to implement")
 		t.Log("")
-		
+
 		t.Log("✅ Challenge type documentation complete")
 	})
 }

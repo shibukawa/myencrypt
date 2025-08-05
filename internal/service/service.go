@@ -11,11 +11,11 @@ import (
 	"time"
 
 	"github.com/gorilla/mux"
-	"github.com/shibukawayoshiki/myencrypt2/internal/acme"
-	"github.com/shibukawayoshiki/myencrypt2/internal/certmanager"
-	"github.com/shibukawayoshiki/myencrypt2/internal/config"
-	"github.com/shibukawayoshiki/myencrypt2/internal/logger"
-	"github.com/shibukawayoshiki/myencrypt2/internal/management"
+	"github.com/shibukawa/myencrypt/internal/acme"
+	"github.com/shibukawa/myencrypt/internal/certmanager"
+	"github.com/shibukawa/myencrypt/internal/config"
+	"github.com/shibukawa/myencrypt/internal/logger"
+	"github.com/shibukawa/myencrypt/internal/management"
 
 	"github.com/kardianos/service"
 )
@@ -329,19 +329,19 @@ func (m *Manager) GetServiceConfig() *service.Config {
 // initializeCertManager initializes the certificate manager
 func (m *Manager) initializeCertManager() (certmanager.Manager, error) {
 	m.logger.Info("Initializing certificate manager")
-	
+
 	certMgr := certmanager.New(m.config, m.logger)
-	
+
 	// Ensure CA certificate exists
 	if err := certMgr.InitializeCA(); err != nil {
 		return nil, fmt.Errorf("failed to initialize CA: %w", err)
 	}
-	
+
 	// Load allowed domains
 	if err := certMgr.LoadAllowedDomains(); err != nil {
 		return nil, fmt.Errorf("failed to load allowed domains: %w", err)
 	}
-	
+
 	m.logger.Info("Certificate manager initialized successfully")
 	return certMgr, nil
 }
@@ -349,19 +349,19 @@ func (m *Manager) initializeCertManager() (certmanager.Manager, error) {
 // startACMEServer starts the ACME protocol server
 func (m *Manager) startACMEServer(ctx context.Context, certMgr certmanager.Manager) (*acme.HTTPServer, error) {
 	m.logger.Info("Starting ACME server", "port", m.config.HTTPPort)
-	
+
 	acmeServer := acme.NewHTTPServer(m.config, certMgr, m.logger)
-	
+
 	// Start the server in a goroutine
 	go func() {
 		if err := acmeServer.Start(ctx); err != nil {
 			m.logger.Error("ACME server error", "error", err)
 		}
 	}()
-	
+
 	// Give the server a moment to start
 	time.Sleep(100 * time.Millisecond)
-	
+
 	m.logger.Info("ACME server started successfully")
 	return acmeServer, nil
 }
@@ -369,23 +369,23 @@ func (m *Manager) startACMEServer(ctx context.Context, certMgr certmanager.Manag
 // startUnifiedServer starts a unified server with both ACME and management features
 func (m *Manager) startUnifiedServer(ctx context.Context, certMgr certmanager.Manager) (*UnifiedServer, error) {
 	m.logger.Info("Starting unified server", "port", m.config.HTTPPort)
-	
+
 	unifiedServer := &UnifiedServer{
 		config:      m.config,
 		logger:      m.logger,
 		certManager: certMgr,
 	}
-	
+
 	// Start the server in a goroutine
 	go func() {
 		if err := unifiedServer.Start(ctx); err != nil {
 			m.logger.Error("Unified server error", "error", err)
 		}
 	}()
-	
+
 	// Give the server a moment to start
 	time.Sleep(100 * time.Millisecond)
-	
+
 	m.logger.Info("Unified server started successfully")
 	return unifiedServer, nil
 }
@@ -402,43 +402,43 @@ type UnifiedServer struct {
 func (u *UnifiedServer) Start(ctx context.Context) error {
 	// Create router
 	router := mux.NewRouter()
-	
+
 	// Add ACME server handlers
 	acmeServer := acme.NewServer(u.config, u.certManager, u.logger)
 	acmeServer.RegisterHandlers(router)
-	
+
 	// Add management server handlers
 	mgmtServer := management.NewServer(u.config, u.certManager, u.logger)
 	mgmtServer.RegisterHandlers(router)
-	
+
 	// Create HTTP server
 	u.httpServer = &http.Server{
 		Addr:    fmt.Sprintf("%s:%d", u.config.BindAddress, u.config.HTTPPort),
 		Handler: router,
 	}
-	
+
 	u.logger.Info("Starting unified HTTP server", "address", u.httpServer.Addr)
-	
+
 	// Start server
 	if err := u.httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		return fmt.Errorf("unified server failed: %w", err)
 	}
-	
+
 	return nil
 }
 
 // Shutdown shuts down the unified server
 func (u *UnifiedServer) Shutdown() error {
 	u.logger.Info("Shutting down unified server")
-	
+
 	if u.httpServer != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		
+
 		if err := u.httpServer.Shutdown(ctx); err != nil {
 			return fmt.Errorf("failed to shutdown unified server: %w", err)
 		}
 	}
-	
+
 	return nil
 }

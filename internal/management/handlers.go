@@ -13,11 +13,11 @@ import (
 	"strings"
 	"time"
 
-	_ "github.com/mattn/go-sqlite3"
 	"github.com/gorilla/mux"
-	"github.com/shibukawayoshiki/myencrypt2/internal/certmanager"
-	"github.com/shibukawayoshiki/myencrypt2/internal/config"
-	"github.com/shibukawayoshiki/myencrypt2/internal/logger"
+	_ "github.com/mattn/go-sqlite3"
+	"github.com/shibukawa/myencrypt/internal/certmanager"
+	"github.com/shibukawa/myencrypt/internal/config"
+	"github.com/shibukawa/myencrypt/internal/logger"
 )
 
 // Server represents the management server
@@ -43,11 +43,11 @@ func NewServer(cfg *config.Config, certMgr certmanager.Manager, log *logger.Logg
 func (s *Server) RegisterHandlers(router *mux.Router) {
 	// Health check endpoint
 	router.HandleFunc("/health", s.handleHealth).Methods("GET")
-	
+
 	// Revocation endpoints
 	router.HandleFunc("/revoke-account", s.handleRevokeAccount).Methods("POST")
 	router.HandleFunc("/revoke-certificate", s.handleRevokeCertificate).Methods("POST")
-	
+
 	// Download endpoints
 	downloadRouter := router.PathPrefix("/download").Subrouter()
 	downloadRouter.HandleFunc("/certificate", s.handleDownloadCertificate).Methods("GET", "HEAD")
@@ -58,10 +58,10 @@ func (s *Server) RegisterHandlers(router *mux.Router) {
 	downloadRouter.HandleFunc("/uninstall.ps1", s.handleDownloadUninstallPs1).Methods("GET", "HEAD")
 	downloadRouter.HandleFunc("/uninstall-all.sh", s.handleDownloadUninstallAllSh).Methods("GET", "HEAD")
 	downloadRouter.HandleFunc("/uninstall-all.ps1", s.handleDownloadUninstallAllPs1).Methods("GET", "HEAD")
-	
+
 	// Download page
 	router.HandleFunc("/download/", s.handleWebUI).Methods("GET")
-	
+
 	// Web UI (management interface and download page)
 	router.HandleFunc("/", s.handleWebUI).Methods("GET")
 }
@@ -69,12 +69,12 @@ func (s *Server) RegisterHandlers(router *mux.Router) {
 // Health check handler
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	s.logger.Debug("Health check requested", "remote_addr", r.RemoteAddr)
-	
+
 	response := map[string]interface{}{
 		"status":    "healthy",
 		"timestamp": time.Now().UTC().Format(time.RFC3339),
 	}
-	
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(response)
 }
@@ -86,14 +86,14 @@ func (s *Server) handleRevokeAccount(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Missing account_id", http.StatusBadRequest)
 		return
 	}
-	
+
 	err := s.revokeAccount(accountID)
 	if err != nil {
 		s.logger.Error("Failed to revoke account", "account_id", accountID, "error", err)
 		http.Error(w, "Failed to revoke account", http.StatusInternalServerError)
 		return
 	}
-	
+
 	s.logger.Info("Account revoked", "account_id", accountID)
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
@@ -104,14 +104,14 @@ func (s *Server) handleRevokeCertificate(w http.ResponseWriter, r *http.Request)
 		http.Error(w, "Missing cert_id", http.StatusBadRequest)
 		return
 	}
-	
+
 	err := s.revokeCertificate(certID)
 	if err != nil {
 		s.logger.Error("Failed to revoke certificate", "cert_id", certID, "error", err)
 		http.Error(w, "Failed to revoke certificate", http.StatusInternalServerError)
 		return
 	}
-	
+
 	s.logger.Info("Certificate revoked", "cert_id", certID)
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
@@ -136,21 +136,21 @@ func (s *Server) serveManagementInterface(w http.ResponseWriter, r *http.Request
 		s.logger.Error("Failed to get statistics", "error", err)
 		stats = &Statistics{} // Use empty stats on error
 	}
-	
+
 	// Get accounts
 	accounts, err := s.getAllAccounts()
 	if err != nil {
 		s.logger.Error("Failed to get accounts", "error", err)
 		accounts = []*AccountInfo{} // Use empty slice on error
 	}
-	
+
 	// Get certificates
 	certificates, err := s.getAllCertificates()
 	if err != nil {
 		s.logger.Error("Failed to get certificates", "error", err)
 		certificates = []*CertificateInfo{} // Use empty slice on error
 	}
-	
+
 	html := fmt.Sprintf(`<!DOCTYPE html>
 <html>
 <head>
@@ -233,10 +233,10 @@ func (s *Server) serveManagementInterface(w http.ResponseWriter, r *http.Request
         </div>
     </div>
 </body>
-</html>`, 
-		stats.ActiveAccounts, 
-		stats.ValidCertificates, 
-		stats.ExpiredCertificates, 
+</html>`,
+		stats.ActiveAccounts,
+		stats.ValidCertificates,
+		stats.ExpiredCertificates,
 		stats.RevokedCertificates,
 		s.renderAccountsTable(accounts),
 		s.renderCertificatesTable(certificates))
@@ -250,7 +250,7 @@ func (s *Server) serveDownloadInterface(w http.ResponseWriter, r *http.Request) 
 	// Detect OS from User-Agent
 	userAgent := r.Header.Get("User-Agent")
 	isWindows := strings.Contains(strings.ToLower(userAgent), "windows")
-	
+
 	// Detect Docker environment and get exposed port
 	exposePort := os.Getenv("MYENCRYPT_EXPOSE_PORT")
 	var scriptPort int
@@ -265,10 +265,10 @@ func (s *Server) serveDownloadInterface(w http.ResponseWriter, r *http.Request) 
 		// Development mode: use configured port
 		scriptPort = s.config.HTTPPort
 	}
-	
+
 	var oneLineCommand string
 	var shellType string
-	
+
 	if isWindows {
 		shellType = "PowerShell"
 		oneLineCommand = fmt.Sprintf(`iwr -useb http://localhost:%d/download/install.ps1 | iex`, scriptPort)
@@ -276,11 +276,11 @@ func (s *Server) serveDownloadInterface(w http.ResponseWriter, r *http.Request) 
 		shellType = "Bash"
 		oneLineCommand = fmt.Sprintf(`/bin/bash -c "$(curl -fsSL http://localhost:%d/download/install.sh)"`, scriptPort)
 	}
-	
+
 	// Docker-specific commands (same as regular commands now since we detect Docker automatically)
 	dockerBashCommand := fmt.Sprintf(`curl -sSL http://localhost:%d/download/install.sh | bash`, scriptPort)
 	dockerPowerShellCommand := fmt.Sprintf(`curl http://localhost:%d/download/install.ps1 -o install.ps1; .\\install.ps1`, scriptPort)
-	
+
 	html := fmt.Sprintf(`<!DOCTYPE html>
 <html>
 <head>
@@ -551,14 +551,14 @@ func (s *Server) serveDownloadInterface(w http.ResponseWriter, r *http.Request) 
 // Download handlers (existing implementations)
 func (s *Server) handleDownloadCertificate(w http.ResponseWriter, r *http.Request) {
 	s.logger.Debug("CA certificate download requested", "remote_addr", r.RemoteAddr)
-	
+
 	certPEM, err := s.certManager.GetCACertificatePEM()
 	if err != nil {
 		s.logger.Error("Failed to get CA certificate", "error", err)
 		http.Error(w, "Failed to get CA certificate", http.StatusInternalServerError)
 		return
 	}
-	
+
 	w.Header().Set("Content-Type", "application/x-pem-file")
 	w.Header().Set("Content-Disposition", "attachment; filename=\"rootCA.pem\"")
 	w.Write(certPEM)
@@ -566,11 +566,11 @@ func (s *Server) handleDownloadCertificate(w http.ResponseWriter, r *http.Reques
 
 func (s *Server) handleDownloadBundle(w http.ResponseWriter, r *http.Request) {
 	s.logger.Debug("Bundle download requested", "remote_addr", r.RemoteAddr)
-	
+
 	// Create a buffer to write our archive to
 	buf := new(bytes.Buffer)
 	zipWriter := zip.NewWriter(buf)
-	
+
 	// Add CA certificate
 	certPEM, err := s.certManager.GetCACertificatePEM()
 	if err != nil {
@@ -578,14 +578,14 @@ func (s *Server) handleDownloadBundle(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Failed to create bundle", http.StatusInternalServerError)
 		return
 	}
-	
+
 	certFile, err := zipWriter.Create("rootCA.pem")
 	if err != nil {
 		http.Error(w, "Failed to create bundle", http.StatusInternalServerError)
 		return
 	}
 	certFile.Write(certPEM)
-	
+
 	// Add README
 	readmeContent := fmt.Sprintf(`MyEncrypt CA Bundle
 ==================
@@ -599,16 +599,16 @@ Installation:
 
 For more information, visit: https://github.com/myencrypt/myencrypt
 `, s.config.HTTPPort)
-	
+
 	readmeFile, err := zipWriter.Create("README.txt")
 	if err != nil {
 		http.Error(w, "Failed to create bundle", http.StatusInternalServerError)
 		return
 	}
 	readmeFile.Write([]byte(readmeContent))
-	
+
 	zipWriter.Close()
-	
+
 	w.Header().Set("Content-Type", "application/zip")
 	w.Header().Set("Content-Disposition", "attachment; filename=\"myencrypt-bundle.zip\"")
 	w.Header().Set("Content-Length", strconv.Itoa(buf.Len()))
@@ -617,7 +617,7 @@ For more information, visit: https://github.com/myencrypt/myencrypt
 
 func (s *Server) handleDownloadInstallSh(w http.ResponseWriter, r *http.Request) {
 	s.logger.Debug("Install script download requested", "remote_addr", r.RemoteAddr)
-	
+
 	// Detect Docker environment and get exposed port
 	exposePort := os.Getenv("MYENCRYPT_EXPOSE_PORT")
 	projectName := os.Getenv("MYENCRYPT_PROJECT_NAME")
@@ -633,7 +633,7 @@ func (s *Server) handleDownloadInstallSh(w http.ResponseWriter, r *http.Request)
 		// Development mode: use configured port
 		scriptPort = s.config.HTTPPort
 	}
-	
+
 	// Determine Linux file name
 	var linuxFileName string
 	if projectName != "" {
@@ -643,7 +643,7 @@ func (s *Server) handleDownloadInstallSh(w http.ResponseWriter, r *http.Request)
 		// Service mode: use default name
 		linuxFileName = "myencrypt-rootCA.crt"
 	}
-	
+
 	script := fmt.Sprintf(`#!/bin/bash
 # MyEncrypt CA Installation Script
 
@@ -770,7 +770,7 @@ echo ""
 echo "To remove ALL MyEncrypt CA certificates:"
 echo "   curl -sSL http://localhost:%d/download/uninstall-all.sh | bash"
 `, scriptPort, linuxFileName, scriptPort, scriptPort, scriptPort)
-	
+
 	w.Header().Set("Content-Type", "text/plain")
 	w.Header().Set("Content-Disposition", "attachment; filename=\"install.sh\"")
 	w.Write([]byte(script))
@@ -778,7 +778,7 @@ echo "   curl -sSL http://localhost:%d/download/uninstall-all.sh | bash"
 
 func (s *Server) handleDownloadInstallPs1(w http.ResponseWriter, r *http.Request) {
 	s.logger.Debug("PowerShell install script download requested", "remote_addr", r.RemoteAddr)
-	
+
 	// Detect Docker environment and get exposed port
 	exposePort := os.Getenv("MYENCRYPT_EXPOSE_PORT")
 	var scriptPort int
@@ -793,7 +793,7 @@ func (s *Server) handleDownloadInstallPs1(w http.ResponseWriter, r *http.Request
 		// Development mode: use configured port
 		scriptPort = s.config.HTTPPort
 	}
-	
+
 	script := fmt.Sprintf(`# MyEncrypt CA Installation Script (PowerShell)
 
 Write-Host "Installing MyEncrypt CA certificate..." -ForegroundColor Green
@@ -919,7 +919,7 @@ catch {
     exit 1
 }
 `, scriptPort, scriptPort, scriptPort, scriptPort)
-	
+
 	w.Header().Set("Content-Type", "text/plain")
 	w.Header().Set("Content-Disposition", "attachment; filename=\"install.ps1\"")
 	w.Write([]byte(script))
@@ -927,7 +927,7 @@ catch {
 
 func (s *Server) handleDownloadUninstallSh(w http.ResponseWriter, r *http.Request) {
 	s.logger.Debug("Uninstall script download requested", "remote_addr", r.RemoteAddr)
-	
+
 	// Detect Docker environment and get exposed port
 	exposePort := os.Getenv("MYENCRYPT_EXPOSE_PORT")
 	projectName := os.Getenv("MYENCRYPT_PROJECT_NAME")
@@ -943,7 +943,7 @@ func (s *Server) handleDownloadUninstallSh(w http.ResponseWriter, r *http.Reques
 		// Development mode: use configured port
 		scriptPort = s.config.HTTPPort
 	}
-	
+
 	// Determine CA certificate name
 	var caName, linuxFileName string
 	if projectName != "" {
@@ -955,7 +955,7 @@ func (s *Server) handleDownloadUninstallSh(w http.ResponseWriter, r *http.Reques
 		caName = "MyEncrypt Development CA"
 		linuxFileName = "myencrypt-rootCA.crt"
 	}
-	
+
 	script := fmt.Sprintf(`#!/bin/bash
 # MyEncrypt CA Uninstallation Script
 
@@ -1063,7 +1063,7 @@ echo ""
 echo "To remove ALL MyEncrypt CA certificates:"
 echo "   curl -sSL http://localhost:%d/download/uninstall-all.sh | bash"
 `, caName, linuxFileName, scriptPort, scriptPort)
-	
+
 	w.Header().Set("Content-Type", "text/plain")
 	w.Header().Set("Content-Disposition", "attachment; filename=\"uninstall.sh\"")
 	w.Write([]byte(script))
@@ -1071,7 +1071,7 @@ echo "   curl -sSL http://localhost:%d/download/uninstall-all.sh | bash"
 
 func (s *Server) handleDownloadUninstallPs1(w http.ResponseWriter, r *http.Request) {
 	s.logger.Debug("PowerShell uninstall script download requested", "remote_addr", r.RemoteAddr)
-	
+
 	// Detect Docker environment and get exposed port
 	exposePort := os.Getenv("MYENCRYPT_EXPOSE_PORT")
 	projectName := os.Getenv("MYENCRYPT_PROJECT_NAME")
@@ -1087,7 +1087,7 @@ func (s *Server) handleDownloadUninstallPs1(w http.ResponseWriter, r *http.Reque
 		// Development mode: use configured port
 		scriptPort = s.config.HTTPPort
 	}
-	
+
 	// Determine CA certificate name
 	var caName string
 	if projectName != "" {
@@ -1097,7 +1097,7 @@ func (s *Server) handleDownloadUninstallPs1(w http.ResponseWriter, r *http.Reque
 		// Service mode: use default name
 		caName = "MyEncrypt Development CA"
 	}
-	
+
 	script := fmt.Sprintf(`# MyEncrypt CA Uninstallation Script (PowerShell)
 
 Write-Host "Uninstalling MyEncrypt CA certificate..." -ForegroundColor Green
@@ -1129,7 +1129,7 @@ catch {
     exit 1
 }
 `, caName, scriptPort, scriptPort)
-	
+
 	w.Header().Set("Content-Type", "text/plain")
 	w.Header().Set("Content-Disposition", "attachment; filename=\"uninstall.ps1\"")
 	w.Write([]byte(script))
@@ -1137,7 +1137,7 @@ catch {
 
 func (s *Server) handleDownloadUninstallAllSh(w http.ResponseWriter, r *http.Request) {
 	s.logger.Debug("Uninstall-all script download requested", "remote_addr", r.RemoteAddr)
-	
+
 	// Detect Docker environment and get exposed port
 	exposePort := os.Getenv("MYENCRYPT_EXPOSE_PORT")
 	var scriptPort int
@@ -1152,7 +1152,7 @@ func (s *Server) handleDownloadUninstallAllSh(w http.ResponseWriter, r *http.Req
 		// Development mode: use configured port
 		scriptPort = s.config.HTTPPort
 	}
-	
+
 	script := fmt.Sprintf(`#!/bin/bash
 # MyEncrypt CA Complete Uninstallation Script
 # This script removes ALL MyEncrypt CA certificates from the system
@@ -1193,7 +1193,7 @@ echo ""
 echo "To install a new CA certificate:"
 echo "   curl -sSL http://localhost:%d/download/install.sh | bash"
 `, scriptPort)
-	
+
 	w.Header().Set("Content-Type", "text/plain")
 	w.Header().Set("Content-Disposition", "attachment; filename=\"uninstall-all.sh\"")
 	w.Write([]byte(script))
@@ -1201,7 +1201,7 @@ echo "   curl -sSL http://localhost:%d/download/install.sh | bash"
 
 func (s *Server) handleDownloadUninstallAllPs1(w http.ResponseWriter, r *http.Request) {
 	s.logger.Debug("PowerShell uninstall-all script download requested", "remote_addr", r.RemoteAddr)
-	
+
 	// Detect Docker environment and get exposed port
 	exposePort := os.Getenv("MYENCRYPT_EXPOSE_PORT")
 	var scriptPort int
@@ -1216,7 +1216,7 @@ func (s *Server) handleDownloadUninstallAllPs1(w http.ResponseWriter, r *http.Re
 		// Development mode: use configured port
 		scriptPort = s.config.HTTPPort
 	}
-	
+
 	script := fmt.Sprintf(`# MyEncrypt CA Complete Uninstallation Script (PowerShell)
 # This script removes ALL MyEncrypt CA certificates from the Windows certificate store
 
@@ -1256,7 +1256,7 @@ catch {
     exit 1
 }
 `, scriptPort)
-	
+
 	w.Header().Set("Content-Type", "text/plain")
 	w.Header().Set("Content-Disposition", "attachment; filename=\"uninstall-all.ps1\"")
 	w.Write([]byte(script))
@@ -1301,33 +1301,33 @@ func (s *Server) getStatistics() (*Statistics, error) {
 		return nil, err
 	}
 	defer db.Close()
-	
+
 	stats := &Statistics{}
-	
+
 	// Count active accounts
 	err = db.QueryRow("SELECT COUNT(*) FROM accounts WHERE status = 'valid'").Scan(&stats.ActiveAccounts)
 	if err != nil && err != sql.ErrNoRows {
 		return nil, err
 	}
-	
+
 	// Count valid certificates
 	err = db.QueryRow("SELECT COUNT(*) FROM certificates WHERE status = 'valid'").Scan(&stats.ValidCertificates)
 	if err != nil && err != sql.ErrNoRows {
 		return nil, err
 	}
-	
+
 	// Count expired certificates
 	err = db.QueryRow("SELECT COUNT(*) FROM certificates WHERE expires_at < CURRENT_TIMESTAMP AND status = 'valid'").Scan(&stats.ExpiredCertificates)
 	if err != nil && err != sql.ErrNoRows {
 		return nil, err
 	}
-	
+
 	// Count revoked certificates
 	err = db.QueryRow("SELECT COUNT(*) FROM certificates WHERE status = 'revoked'").Scan(&stats.RevokedCertificates)
 	if err != nil && err != sql.ErrNoRows {
 		return nil, err
 	}
-	
+
 	return stats, nil
 }
 
@@ -1337,7 +1337,7 @@ func (s *Server) getAllAccounts() ([]*AccountInfo, error) {
 		return nil, err
 	}
 	defer db.Close()
-	
+
 	query := `
 		SELECT a.id, a.contact, a.status, a.created_at, 
 		       COALESCE(cert_count.count, 0) as cert_count
@@ -1350,18 +1350,18 @@ func (s *Server) getAllAccounts() ([]*AccountInfo, error) {
 		) cert_count ON a.id = cert_count.account_id
 		ORDER BY a.created_at DESC
 	`
-	
+
 	rows, err := db.Query(query)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	
+
 	var accounts []*AccountInfo
 	for rows.Next() {
 		var account AccountInfo
 		var contactJSON string
-		
+
 		err := rows.Scan(
 			&account.ID,
 			&contactJSON,
@@ -1372,15 +1372,15 @@ func (s *Server) getAllAccounts() ([]*AccountInfo, error) {
 		if err != nil {
 			continue
 		}
-		
+
 		// Parse contact JSON
 		if contactJSON != "" {
 			json.Unmarshal([]byte(contactJSON), &account.Contact)
 		}
-		
+
 		accounts = append(accounts, &account)
 	}
-	
+
 	return accounts, nil
 }
 
@@ -1390,7 +1390,7 @@ func (s *Server) getAllCertificates() ([]*CertificateInfo, error) {
 		return nil, err
 	}
 	defer db.Close()
-	
+
 	query := `
 		SELECT c.id, c.account_id, c.serial_number, c.domains, c.issued_at, c.expires_at, 
 		       c.status, c.revoked_at, a.contact
@@ -1398,18 +1398,18 @@ func (s *Server) getAllCertificates() ([]*CertificateInfo, error) {
 		LEFT JOIN accounts a ON c.account_id = a.id
 		ORDER BY c.issued_at DESC
 	`
-	
+
 	rows, err := db.Query(query)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	
+
 	var certificates []*CertificateInfo
 	for rows.Next() {
 		var cert CertificateInfo
 		var domainsJSON, contactJSON sql.NullString
-		
+
 		err := rows.Scan(
 			&cert.ID,
 			&cert.AccountID,
@@ -1424,20 +1424,20 @@ func (s *Server) getAllCertificates() ([]*CertificateInfo, error) {
 		if err != nil {
 			continue
 		}
-		
+
 		// Parse domains JSON
 		if domainsJSON.Valid {
 			json.Unmarshal([]byte(domainsJSON.String), &cert.Domains)
 		}
-		
+
 		// Parse contact JSON
 		if contactJSON.Valid {
 			json.Unmarshal([]byte(contactJSON.String), &cert.AccountContact)
 		}
-		
+
 		certificates = append(certificates, &cert)
 	}
-	
+
 	return certificates, nil
 }
 
@@ -1447,7 +1447,7 @@ func (s *Server) revokeAccount(accountID string) error {
 		return err
 	}
 	defer db.Close()
-	
+
 	query := `UPDATE accounts SET status = 'deactivated', updated_at = CURRENT_TIMESTAMP WHERE id = ?`
 	_, err = db.Exec(query, accountID)
 	return err
@@ -1459,7 +1459,7 @@ func (s *Server) revokeCertificate(certID string) error {
 		return err
 	}
 	defer db.Close()
-	
+
 	query := `UPDATE certificates SET status = 'revoked', revoked_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?`
 	_, err = db.Exec(query, certID)
 	return err
@@ -1473,7 +1473,7 @@ func (s *Server) renderAccountsTable(accounts []*AccountInfo) string {
 			<p><small>Accounts will appear here when clients register via the ACME protocol.</small></p>
 		</div>`
 	}
-	
+
 	html := `<table>
 		<thead>
 			<tr>
@@ -1486,18 +1486,18 @@ func (s *Server) renderAccountsTable(accounts []*AccountInfo) string {
 			</tr>
 		</thead>
 		<tbody>`
-	
+
 	for _, account := range accounts {
 		statusClass := "status-valid"
 		if account.Status == "deactivated" {
 			statusClass = "status-deactivated"
 		}
-		
+
 		contact := ""
 		if len(account.Contact) > 0 {
 			contact = account.Contact[0]
 		}
-		
+
 		html += fmt.Sprintf(`
 			<tr>
 				<td><span class="account-id">%s</span></td>
@@ -1520,7 +1520,7 @@ func (s *Server) renderAccountsTable(accounts []*AccountInfo) string {
 			account.CertCount,
 			account.ID)
 	}
-	
+
 	html += `</tbody></table>`
 	return html
 }
@@ -1532,7 +1532,7 @@ func (s *Server) renderCertificatesTable(certificates []*CertificateInfo) string
 			<p><small>Certificates will appear here when issued via the ACME protocol.</small></p>
 		</div>`
 	}
-	
+
 	html := `<table>
 		<thead>
 			<tr>
@@ -1546,7 +1546,7 @@ func (s *Server) renderCertificatesTable(certificates []*CertificateInfo) string
 			</tr>
 		</thead>
 		<tbody>`
-	
+
 	for _, cert := range certificates {
 		statusClass := "status-valid"
 		switch cert.Status {
@@ -1557,17 +1557,17 @@ func (s *Server) renderCertificatesTable(certificates []*CertificateInfo) string
 				statusClass = "status-expired"
 			}
 		}
-		
+
 		domains := strings.Join(cert.Domains, ", ")
 		if len(domains) > 50 {
 			domains = domains[:47] + "..."
 		}
-		
+
 		contact := ""
 		if len(cert.AccountContact) > 0 {
 			contact = cert.AccountContact[0]
 		}
-		
+
 		html += fmt.Sprintf(`
 			<tr>
 				<td><span class="account-id">%s</span></td>
@@ -1593,7 +1593,7 @@ func (s *Server) renderCertificatesTable(certificates []*CertificateInfo) string
 			cert.ExpiresAt.Format("2006-01-02 15:04"),
 			cert.ID)
 	}
-	
+
 	html += `</tbody></table>`
 	return html
 }

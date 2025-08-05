@@ -13,8 +13,8 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/shibukawayoshiki/myencrypt2/internal/config"
-	"github.com/shibukawayoshiki/myencrypt2/internal/logger"
+	"github.com/shibukawa/myencrypt/internal/config"
+	"github.com/shibukawa/myencrypt/internal/logger"
 )
 
 // CACertificate represents a CA certificate and its private key
@@ -257,7 +257,7 @@ func (ca *CAManager) generateCACertificate() (*CACertificate, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal ECDSA private key: %w", err)
 	}
-	
+
 	keyPEM := pem.EncodeToMemory(&pem.Block{
 		Type:  "EC PRIVATE KEY",
 		Bytes: keyBytes,

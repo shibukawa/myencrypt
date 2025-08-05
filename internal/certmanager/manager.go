@@ -4,8 +4,8 @@ import (
 	"crypto/ecdsa"
 	"crypto/x509"
 
-	"github.com/shibukawayoshiki/myencrypt2/internal/config"
-	"github.com/shibukawayoshiki/myencrypt2/internal/logger"
+	"github.com/shibukawa/myencrypt/internal/config"
+	"github.com/shibukawa/myencrypt/internal/logger"
 )
 
 // Manager represents a unified certificate manager interface
@@ -17,19 +17,19 @@ type Manager interface {
 	IsCAInstalled() (bool, error)
 	ValidateCA() error
 	GetCertificateStorePath() string
-	
+
 	// Individual certificate generation
 	GenerateCertificate(domain string) (*Certificate, error)
 	GenerateCertificateFromCSR(csr *x509.CertificateRequest) (*Certificate, error)
 	ValidateCertificate(cert *Certificate) error
 	GetCertificateChain(cert *Certificate) ([]byte, error)
-	
+
 	// Certificate listing and management
 	ListCertificates() (map[string]*Certificate, error)
 	GetCertificate(domain string) (*Certificate, error)
 	DeleteCertificate(domain string) error
 	GetCertificateInfo(cert *Certificate) map[string]interface{}
-	
+
 	// Domain management
 	LoadAllowedDomains() error
 	ReloadAllowedDomains() error
@@ -38,7 +38,7 @@ type Manager interface {
 	AddDomainToFile(domain string) error
 	RemoveDomainFromFile(domain string) error
 	GetAllowedDomainsFilePath() string
-	
+
 	// Management API methods (CA only)
 	GetCACertificatePEM() ([]byte, error)
 	GetCAInfo() (map[string]interface{}, error)
@@ -47,7 +47,7 @@ type Manager interface {
 
 // CombinedManager combines CA and domain management functionality
 type CombinedManager struct {
-	caManager   *CAManager
+	caManager     *CAManager
 	domainManager *DomainManager
 	certManager   *CertificateManager
 }
@@ -57,7 +57,7 @@ func New(cfg *config.Config, log *logger.Logger) Manager {
 	caManager := NewCAManager(cfg, log)
 	domainManager := NewDomainManager(cfg, log)
 	certManager := NewCertificateManager(cfg, log, caManager)
-	
+
 	return &CombinedManager{
 		caManager:     caManager,
 		domainManager: domainManager,

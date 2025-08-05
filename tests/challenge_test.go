@@ -68,7 +68,7 @@ func TestHTTP01Challenge(t *testing.T) {
 		}
 		t.Logf("✅ Authorization retrieved: %s", authz.Identifier.Value)
 		t.Logf("📋 Authorization has %d challenges", len(authz.Challenges))
-		
+
 		// Log all challenges
 		for i, challenge := range authz.Challenges {
 			t.Logf("Challenge %d: Type=%s, Status=%s, URI=%s", i, challenge.Type, challenge.Status, challenge.URI)

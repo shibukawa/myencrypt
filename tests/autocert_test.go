@@ -128,10 +128,10 @@ func TestAutocertLimitations(t *testing.T) {
 
 	t.Run("UnsupportedFeatures", func(t *testing.T) {
 		// Test features that autocert might expect but we don't support
-		
+
 		// 1. Test external account binding (EAB)
 		t.Log("Testing External Account Binding (EAB) support...")
-		
+
 		// Our server doesn't require EAB, so this should work
 		client := &acme.Client{
 			DirectoryURL: fmt.Sprintf("http://localhost:%d/acme/directory", server.Config.HTTPPort),
@@ -225,7 +225,7 @@ func TestAutocertLimitations(t *testing.T) {
 					t.Logf("Request %d returned status %d", i+1, resp.StatusCode)
 				}
 			}
-			
+
 			// Small delay between requests
 			time.Sleep(100 * time.Millisecond)
 		}

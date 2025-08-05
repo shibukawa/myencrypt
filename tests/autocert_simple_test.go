@@ -246,13 +246,13 @@ func BenchmarkAutocertOperations(b *testing.B) {
 	b.Run("DirectoryDiscovery", func(b *testing.B) {
 		ctx := context.Background()
 		b.ResetTimer()
-		
+
 		for i := 0; i < b.N; i++ {
 			client, err := NewACMEClient(server.Config.HTTPPort)
 			if err != nil {
 				b.Fatalf("Failed to create ACME client: %v", err)
 			}
-			
+
 			_, err = client.client.Discover(ctx)
 			if err != nil {
 				b.Fatalf("Directory discovery failed: %v", err)
@@ -263,13 +263,13 @@ func BenchmarkAutocertOperations(b *testing.B) {
 	b.Run("AccountRegistration", func(b *testing.B) {
 		ctx := context.Background()
 		b.ResetTimer()
-		
+
 		for i := 0; i < b.N; i++ {
 			client, err := NewACMEClient(server.Config.HTTPPort)
 			if err != nil {
 				b.Fatalf("Failed to create ACME client: %v", err)
 			}
-			
+
 			_, err = client.RegisterAccount(ctx)
 			if err != nil {
 				b.Fatalf("Account registration failed: %v", err)

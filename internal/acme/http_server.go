@@ -8,9 +8,9 @@ import (
 	"time"
 
 	"github.com/gorilla/mux"
-	"github.com/shibukawayoshiki/myencrypt2/internal/certmanager"
-	"github.com/shibukawayoshiki/myencrypt2/internal/config"
-	"github.com/shibukawayoshiki/myencrypt2/internal/logger"
+	"github.com/shibukawa/myencrypt/internal/certmanager"
+	"github.com/shibukawa/myencrypt/internal/config"
+	"github.com/shibukawa/myencrypt/internal/logger"
 )
 
 // HTTPServer represents the HTTP server that hosts the ACME endpoints
@@ -25,7 +25,7 @@ type HTTPServer struct {
 // NewHTTPServer creates a new HTTP server for ACME protocol
 func NewHTTPServer(cfg *config.Config, certMgr certmanager.Manager, log *logger.Logger) *HTTPServer {
 	acmeServer := NewServer(cfg, certMgr, log)
-	
+
 	return &HTTPServer{
 		acmeServer:  acmeServer,
 		config:      cfg,
@@ -37,21 +37,21 @@ func NewHTTPServer(cfg *config.Config, certMgr certmanager.Manager, log *logger.
 // Start starts the HTTP server
 func (h *HTTPServer) Start(ctx context.Context) error {
 	router := mux.NewRouter()
-	
+
 	// Register ACME handlers
 	h.acmeServer.RegisterHandlers(router)
-	
+
 	// Add middleware
 	router.Use(h.loggingMiddleware)
 	router.Use(h.corsMiddleware)
 	router.Use(h.securityHeadersMiddleware)
-	
+
 	// Health check endpoint
 	router.HandleFunc("/health", h.handleHealth).Methods("GET")
-	
+
 	// Root endpoint with basic information
 	router.HandleFunc("/", h.handleRoot).Methods("GET")
-	
+
 	// Create HTTP server
 	addr := fmt.Sprintf("%s:%d", h.config.BindAddress, h.config.HTTPPort)
 	h.server = &http.Server{
@@ -61,14 +61,14 @@ func (h *HTTPServer) Start(ctx context.Context) error {
 		WriteTimeout: 30 * time.Second,
 		IdleTimeout:  60 * time.Second,
 	}
-	
+
 	h.logger.Info("Starting ACME HTTP server", "address", addr)
-	
+
 	// Start the ACME server
 	if err := h.acmeServer.Start(ctx); err != nil {
 		return fmt.Errorf("failed to start ACME server: %w", err)
 	}
-	
+
 	// Start HTTP server in a goroutine
 	errChan := make(chan error, 1)
 	go func() {
@@ -76,7 +76,7 @@ func (h *HTTPServer) Start(ctx context.Context) error {
 			errChan <- fmt.Errorf("HTTP server error: %w", err)
 		}
 	}()
-	
+
 	// Wait for context cancellation or server error
 	select {
 	case <-ctx.Done():
@@ -92,10 +92,10 @@ func (h *HTTPServer) Shutdown() error {
 	if h.server == nil {
 		return nil
 	}
-	
+
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	
+
 	return h.server.Shutdown(ctx)
 }
 
@@ -103,7 +103,7 @@ func (h *HTTPServer) Shutdown() error {
 func (h *HTTPServer) handleHealth(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	
+
 	response := map[string]interface{}{
 		"status":    "healthy",
 		"timestamp": time.Now().UTC().Format(time.RFC3339),
@@ -112,7 +112,7 @@ func (h *HTTPServer) handleHealth(w http.ResponseWriter, r *http.Request) {
 			"acme": "running",
 		},
 	}
-	
+
 	if err := json.NewEncoder(w).Encode(response); err != nil {
 		h.logger.Error("Failed to encode health response", "error", err)
 	}
@@ -122,7 +122,7 @@ func (h *HTTPServer) handleHealth(w http.ResponseWriter, r *http.Request) {
 func (h *HTTPServer) handleRoot(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	
+
 	response := map[string]interface{}{
 		"name":        "MyEncrypt ACME Server",
 		"version":     "1.0.0",
@@ -131,9 +131,9 @@ func (h *HTTPServer) handleRoot(w http.ResponseWriter, r *http.Request) {
 			"directory": "/acme/directory",
 			"health":    "/health",
 		},
-		"documentation": "https://github.com/shibukawayoshiki/myencrypt2",
+		"documentation": "https://github.com/shibukawa/myencrypt",
 	}
-	
+
 	if err := json.NewEncoder(w).Encode(response); err != nil {
 		h.logger.Error("Failed to encode root response", "error", err)
 	}
@@ -145,17 +145,17 @@ func (h *HTTPServer) handleRoot(w http.ResponseWriter, r *http.Request) {
 func (h *HTTPServer) loggingMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
-		
+
 		// Create a response writer wrapper to capture status code
 		wrapper := &responseWriterWrapper{
 			ResponseWriter: w,
 			statusCode:     http.StatusOK,
 		}
-		
+
 		next.ServeHTTP(wrapper, r)
-		
+
 		duration := time.Since(start)
-		
+
 		h.logger.Info("HTTP request",
 			"method", r.Method,
 			"path", r.URL.Path,
@@ -175,13 +175,13 @@ func (h *HTTPServer) corsMiddleware(next http.Handler) http.Handler {
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, HEAD, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
 		w.Header().Set("Access-Control-Expose-Headers", "Replay-Nonce, Location")
-		
+
 		// Handle preflight requests
 		if r.Method == "OPTIONS" {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
-		
+
 		next.ServeHTTP(w, r)
 	})
 }
@@ -194,10 +194,10 @@ func (h *HTTPServer) securityHeadersMiddleware(next http.Handler) http.Handler {
 		w.Header().Set("X-Frame-Options", "DENY")
 		w.Header().Set("X-XSS-Protection", "1; mode=block")
 		w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
-		
+
 		// For development, we don't enforce HTTPS
 		// In production, you might want to add HSTS headers
-		
+
 		next.ServeHTTP(w, r)
 	})
 }

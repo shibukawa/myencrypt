@@ -7,11 +7,11 @@ import (
 	"strings"
 
 	"github.com/shibukawa/incontainer"
-	"github.com/shibukawayoshiki/myencrypt2/internal/certmanager"
-	"github.com/shibukawayoshiki/myencrypt2/internal/config"
-	initialize "github.com/shibukawayoshiki/myencrypt2/internal/init"
-	"github.com/shibukawayoshiki/myencrypt2/internal/logger"
-	"github.com/shibukawayoshiki/myencrypt2/internal/service"
+	"github.com/shibukawa/myencrypt/internal/certmanager"
+	"github.com/shibukawa/myencrypt/internal/config"
+	initialize "github.com/shibukawa/myencrypt/internal/init"
+	"github.com/shibukawa/myencrypt/internal/logger"
+	"github.com/shibukawa/myencrypt/internal/service"
 
 	"github.com/alecthomas/kong"
 )

@@ -6,11 +6,11 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/shibukawayoshiki/myencrypt2/internal/certmanager"
-	"github.com/shibukawayoshiki/myencrypt2/internal/config"
-	"github.com/shibukawayoshiki/myencrypt2/internal/logger"
-	"github.com/shibukawayoshiki/myencrypt2/internal/platform"
-	"github.com/shibukawayoshiki/myencrypt2/internal/scriptgen"
+	"github.com/shibukawa/myencrypt/internal/certmanager"
+	"github.com/shibukawa/myencrypt/internal/config"
+	"github.com/shibukawa/myencrypt/internal/logger"
+	"github.com/shibukawa/myencrypt/internal/platform"
+	"github.com/shibukawa/myencrypt/internal/scriptgen"
 )
 
 // InitCommand handles the init command functionality

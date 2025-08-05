@@ -10,14 +10,14 @@ import (
 
 // Directory represents the ACME directory endpoint response
 type Directory struct {
-	NewNonce   string            `json:"newNonce"`
-	NewAccount string            `json:"newAccount"`
-	NewOrder   string            `json:"newOrder"`
-	NewAuthz   string            `json:"newAuthz,omitempty"`
-	RevokeCert string            `json:"revokeCert"`
-	KeyChange  string            `json:"keyChange"`
-	Meta       *DirectoryMeta    `json:"meta,omitempty"`
-	ExternalAccountRequired bool `json:"externalAccountRequired,omitempty"`
+	NewNonce                string         `json:"newNonce"`
+	NewAccount              string         `json:"newAccount"`
+	NewOrder                string         `json:"newOrder"`
+	NewAuthz                string         `json:"newAuthz,omitempty"`
+	RevokeCert              string         `json:"revokeCert"`
+	KeyChange               string         `json:"keyChange"`
+	Meta                    *DirectoryMeta `json:"meta,omitempty"`
+	ExternalAccountRequired bool           `json:"externalAccountRequired,omitempty"`
 }
 
 // DirectoryMeta contains metadata about the ACME server
@@ -30,12 +30,12 @@ type DirectoryMeta struct {
 
 // Account represents an ACME account
 type Account struct {
-	ID        string    `json:"id"`
+	ID        string      `json:"id"`
 	Key       *JSONWebKey `json:"key"`
-	Contact   []string  `json:"contact,omitempty"`
-	Status    string    `json:"status"`
-	CreatedAt time.Time `json:"createdAt"`
-	UpdatedAt time.Time `json:"updatedAt"`
+	Contact   []string    `json:"contact,omitempty"`
+	Status    string      `json:"status"`
+	CreatedAt time.Time   `json:"createdAt"`
+	UpdatedAt time.Time   `json:"updatedAt"`
 }
 
 // JSONWebKey represents a JSON Web Key (JWK)
@@ -53,19 +53,19 @@ type JSONWebKey struct {
 
 // Order represents a certificate order
 type Order struct {
-	ID           string        `json:"id"`
-	AccountID    string        `json:"accountId"`
-	Status       string        `json:"status"`
-	Expires      time.Time     `json:"expires"`
-	Identifiers  []Identifier  `json:"identifiers"`
-	NotBefore    *time.Time    `json:"notBefore,omitempty"`
-	NotAfter     *time.Time    `json:"notAfter,omitempty"`
-	Error        *ProblemDetails `json:"error,omitempty"`
-	Authorizations []string    `json:"authorizations"`
-	Finalize     string        `json:"finalize"`
-	Certificate  string        `json:"certificate,omitempty"`
-	CreatedAt    time.Time     `json:"createdAt"`
-	UpdatedAt    time.Time     `json:"updatedAt"`
+	ID             string          `json:"id"`
+	AccountID      string          `json:"accountId"`
+	Status         string          `json:"status"`
+	Expires        time.Time       `json:"expires"`
+	Identifiers    []Identifier    `json:"identifiers"`
+	NotBefore      *time.Time      `json:"notBefore,omitempty"`
+	NotAfter       *time.Time      `json:"notAfter,omitempty"`
+	Error          *ProblemDetails `json:"error,omitempty"`
+	Authorizations []string        `json:"authorizations"`
+	Finalize       string          `json:"finalize"`
+	Certificate    string          `json:"certificate,omitempty"`
+	CreatedAt      time.Time       `json:"createdAt"`
+	UpdatedAt      time.Time       `json:"updatedAt"`
 }
 
 // Identifier represents a domain identifier
@@ -76,14 +76,14 @@ type Identifier struct {
 
 // Authorization represents a domain authorization
 type Authorization struct {
-	ID         string        `json:"id"`
-	Identifier Identifier    `json:"identifier"`
-	Status     string        `json:"status"`
-	Expires    time.Time     `json:"expires"`
-	Challenges []Challenge   `json:"challenges"`
-	Wildcard   bool          `json:"wildcard,omitempty"`
-	CreatedAt  time.Time     `json:"createdAt"`
-	UpdatedAt  time.Time     `json:"updatedAt"`
+	ID         string      `json:"id"`
+	Identifier Identifier  `json:"identifier"`
+	Status     string      `json:"status"`
+	Expires    time.Time   `json:"expires"`
+	Challenges []Challenge `json:"challenges"`
+	Wildcard   bool        `json:"wildcard,omitempty"`
+	CreatedAt  time.Time   `json:"createdAt"`
+	UpdatedAt  time.Time   `json:"updatedAt"`
 }
 
 // Challenge represents an ACME challenge (RFC 8555 Section 7.1.4)
@@ -98,11 +98,11 @@ type Challenge struct {
 
 // ProblemDetails represents an RFC 7807 problem details object
 type ProblemDetails struct {
-	Type     string      `json:"type"`
-	Title    string      `json:"title"`
-	Status   int         `json:"status"`
-	Detail   string      `json:"detail"`
-	Instance string      `json:"instance,omitempty"`
+	Type        string       `json:"type"`
+	Title       string       `json:"title"`
+	Status      int          `json:"status"`
+	Detail      string       `json:"detail"`
+	Instance    string       `json:"instance,omitempty"`
 	SubProblems []SubProblem `json:"subproblems,omitempty"`
 }
 
@@ -141,8 +141,8 @@ const (
 
 // Challenge Types
 const (
-	ChallengeTypeHTTP01 = "http-01"
-	ChallengeTypeDNS01  = "dns-01"
+	ChallengeTypeHTTP01    = "http-01"
+	ChallengeTypeDNS01     = "dns-01"
 	ChallengeTypeTLSALPN01 = "tls-alpn-01"
 )
 
@@ -198,8 +198,8 @@ type FinalizeRequest struct {
 
 // KeyChangeRequest represents a key change request
 type KeyChangeRequest struct {
-	Account   string `json:"account"`
-	OldKey    *JSONWebKey `json:"oldKey"`
+	Account string      `json:"account"`
+	OldKey  *JSONWebKey `json:"oldKey"`
 }
 
 // RevocationRequest represents a certificate revocation request
@@ -218,11 +218,11 @@ type JWS struct {
 
 // JWSHeader represents a JWS header
 type JWSHeader struct {
-	Alg   string       `json:"alg"`
-	Nonce string       `json:"nonce,omitempty"`
-	URL   string       `json:"url,omitempty"`
-	JWK   *JSONWebKey  `json:"jwk,omitempty"`
-	Kid   string       `json:"kid,omitempty"`
+	Alg   string      `json:"alg"`
+	Nonce string      `json:"nonce,omitempty"`
+	URL   string      `json:"url,omitempty"`
+	JWK   *JSONWebKey `json:"jwk,omitempty"`
+	Kid   string      `json:"kid,omitempty"`
 }
 
 // NonceResponse represents a nonce response
@@ -247,9 +247,9 @@ type ServerOrder struct {
 // ServerChallenge represents a challenge stored on the server
 type ServerChallenge struct {
 	Challenge
-	ID               string    `json:"id"`               // Internal ID
-	AuthzID          string    `json:"authzId"`          // Authorization ID
-	KeyAuthorization string    `json:"-"`                // Not sent to client
+	ID               string    `json:"id"`      // Internal ID
+	AuthzID          string    `json:"authzId"` // Authorization ID
+	KeyAuthorization string    `json:"-"`       // Not sent to client
 	CreatedAt        time.Time `json:"createdAt"`
 	UpdatedAt        time.Time `json:"updatedAt"`
 }

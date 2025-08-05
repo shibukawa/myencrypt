@@ -9,8 +9,8 @@ import (
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
-	"github.com/shibukawayoshiki/myencrypt2/internal/config"
-	"github.com/shibukawayoshiki/myencrypt2/internal/logger"
+	"github.com/shibukawa/myencrypt/internal/config"
+	"github.com/shibukawa/myencrypt/internal/logger"
 )
 
 // SQLiteStorage implements Storage interface using SQLite
@@ -23,28 +23,28 @@ type SQLiteStorage struct {
 // NewSQLiteStorage creates a new SQLite-based storage
 func NewSQLiteStorage(cfg *config.Config, log *logger.Logger, baseURL string) (*SQLiteStorage, error) {
 	dbPath := cfg.GetDatabasePath()
-	
+
 	// Ensure the directory exists
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0755); err != nil {
 		return nil, fmt.Errorf("failed to create database directory: %w", err)
 	}
-	
+
 	db, err := sql.Open("sqlite3", dbPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
-	
+
 	storage := &SQLiteStorage{
 		db:      db,
 		logger:  log.WithComponent("sqlite-storage"),
 		baseURL: baseURL,
 	}
-	
+
 	if err := storage.initDatabase(); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("failed to initialize database: %w", err)
 	}
-	
+
 	storage.logger.Info("SQLite storage initialized", "path", dbPath)
 	return storage, nil
 }
@@ -141,12 +141,12 @@ func (s *SQLiteStorage) initDatabase() error {
 	CREATE INDEX IF NOT EXISTS idx_certificates_expires_at ON certificates(expires_at);
 	CREATE INDEX IF NOT EXISTS idx_nonces_expires_at ON nonces(expires_at);
 	`
-	
+
 	_, err := s.db.Exec(schema)
 	if err != nil {
 		return err
 	}
-	
+
 	// Run migrations
 	return s.runMigrations()
 }
@@ -160,11 +160,11 @@ func (s *SQLiteStorage) runMigrations() error {
 		FROM pragma_table_info('orders') 
 		WHERE name = 'finalize_url'
 	`).Scan(&columnExists)
-	
+
 	if err != nil {
 		return fmt.Errorf("failed to check finalize_url column: %w", err)
 	}
-	
+
 	// Add finalize_url column if it doesn't exist
 	if !columnExists {
 		s.logger.Info("Adding finalize_url column to orders table")
@@ -173,7 +173,7 @@ func (s *SQLiteStorage) runMigrations() error {
 			return fmt.Errorf("failed to add finalize_url column: %w", err)
 		}
 	}
-	
+
 	return nil
 }
 
@@ -181,28 +181,28 @@ func (s *SQLiteStorage) runMigrations() error {
 func (s *SQLiteStorage) StoreAccount(accountID string, account *ServerAccount) error {
 	contactJSON, _ := json.Marshal(account.Contact)
 	publicKeyJSON, _ := json.Marshal(account.Key)
-	
+
 	query := `
 		INSERT OR REPLACE INTO accounts (id, public_key_jwk, contact, status, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
 	`
-	
+
 	_, err := s.db.Exec(query, accountID, string(publicKeyJSON), string(contactJSON), account.Status, account.CreatedAt)
 	if err != nil {
 		s.logger.Error("Failed to store account", "account_id", accountID, "error", err)
 		return err
 	}
-	
+
 	s.logger.Debug("Account stored", "account_id", accountID)
 	return nil
 }
 
 func (s *SQLiteStorage) GetAccount(accountID string) (*ServerAccount, error) {
 	query := `SELECT id, public_key_jwk, contact, status, created_at, updated_at FROM accounts WHERE id = ?`
-	
+
 	var account ServerAccount
 	var publicKeyJSON, contactJSON string
-	
+
 	err := s.db.QueryRow(query, accountID).Scan(
 		&account.ID,
 		&publicKeyJSON,
@@ -211,25 +211,25 @@ func (s *SQLiteStorage) GetAccount(accountID string) (*ServerAccount, error) {
 		&account.CreatedAt,
 		&account.UpdatedAt,
 	)
-	
+
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, fmt.Errorf("account not found")
 		}
 		return nil, err
 	}
-	
+
 	// Parse JSON fields
 	if err := json.Unmarshal([]byte(publicKeyJSON), &account.Key); err != nil {
 		return nil, fmt.Errorf("failed to parse public key: %w", err)
 	}
-	
+
 	if contactJSON != "" {
 		if err := json.Unmarshal([]byte(contactJSON), &account.Contact); err != nil {
 			return nil, fmt.Errorf("failed to parse contact: %w", err)
 		}
 	}
-	
+
 	return &account, nil
 }
 
@@ -242,30 +242,30 @@ func (s *SQLiteStorage) DeleteAccount(accountID string) error {
 // Order operations
 func (s *SQLiteStorage) StoreOrder(orderID string, order *ServerOrder) error {
 	domainsJSON, _ := json.Marshal(order.Identifiers)
-	
+
 	query := `
 		INSERT OR REPLACE INTO orders (id, account_id, status, domains, not_before, not_after, expires_at, certificate_url, finalize_url, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
 	`
-	
-	_, err := s.db.Exec(query, orderID, order.AccountID, order.Status, string(domainsJSON), 
+
+	_, err := s.db.Exec(query, orderID, order.AccountID, order.Status, string(domainsJSON),
 		order.NotBefore, order.NotAfter, order.Expires, order.Certificate, order.Finalize)
-	
+
 	if err != nil {
 		s.logger.Error("Failed to store order", "order_id", orderID, "error", err)
 		return err
 	}
-	
+
 	s.logger.Debug("Order stored", "order_id", orderID)
 	return nil
 }
 
 func (s *SQLiteStorage) GetOrder(orderID string) (*ServerOrder, error) {
 	query := `SELECT id, account_id, status, domains, not_before, not_after, expires_at, certificate_url, finalize_url FROM orders WHERE id = ?`
-	
+
 	var order ServerOrder
 	var domainsJSON string
-	
+
 	err := s.db.QueryRow(query, orderID).Scan(
 		&order.ID,
 		&order.AccountID,
@@ -277,19 +277,19 @@ func (s *SQLiteStorage) GetOrder(orderID string) (*ServerOrder, error) {
 		&order.Certificate,
 		&order.Finalize,
 	)
-	
+
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, fmt.Errorf("order not found")
 		}
 		return nil, err
 	}
-	
+
 	// Parse domains JSON
 	if err := json.Unmarshal([]byte(domainsJSON), &order.Identifiers); err != nil {
 		return nil, fmt.Errorf("failed to parse domains: %w", err)
 	}
-	
+
 	return &order, nil
 }
 
@@ -313,14 +313,14 @@ func (s *SQLiteStorage) StoreCertificate(certID string, certChain []byte) error 
 		INSERT OR REPLACE INTO certificates (id, order_id, account_id, serial_number, domains, certificate_pem, expires_at)
 		VALUES (?, 'unknown', 'unknown', ?, '[]', ?, datetime('now', '+1 day'))
 	`
-	
+
 	_, err := s.db.Exec(query, certID, certID, string(certChain))
 	return err
 }
 
 func (s *SQLiteStorage) GetCertificate(certID string) ([]byte, error) {
 	query := `SELECT certificate_pem FROM certificates WHERE id = ?`
-	
+
 	var certPEM string
 	err := s.db.QueryRow(query, certID).Scan(&certPEM)
 	if err != nil {
@@ -329,7 +329,7 @@ func (s *SQLiteStorage) GetCertificate(certID string) ([]byte, error) {
 		}
 		return nil, err
 	}
-	
+
 	return []byte(certPEM), nil
 }
 
@@ -345,18 +345,18 @@ func (s *SQLiteStorage) StoreAuthorization(authzID string, authz *ServerAuthoriz
 		INSERT OR REPLACE INTO authorizations (id, order_id, domain, status, expires_at, wildcard, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
 	`
-	
+
 	_, err := s.db.Exec(query, authzID, authz.OrderID, authz.Identifier.Value, authz.Status, authz.Expires, false)
 	return err
 }
 
 func (s *SQLiteStorage) GetAuthorization(authzID string) (*ServerAuthorization, error) {
 	query := `SELECT id, order_id, domain, status, expires_at, wildcard FROM authorizations WHERE id = ?`
-	
+
 	var authz ServerAuthorization
 	var domain string
 	var wildcard bool
-	
+
 	err := s.db.QueryRow(query, authzID).Scan(
 		&authz.ID,
 		&authz.OrderID,
@@ -365,17 +365,17 @@ func (s *SQLiteStorage) GetAuthorization(authzID string) (*ServerAuthorization, 
 		&authz.Expires,
 		&wildcard,
 	)
-	
+
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, fmt.Errorf("authorization not found")
 		}
 		return nil, err
 	}
-	
+
 	authz.Identifier = Identifier{Type: "dns", Value: domain}
 	authz.Wildcard = wildcard
-	
+
 	// Get challenges for this authorization
 	challengeQuery := `SELECT id, type, status, token, key_authorization, validated_at, error_detail, created_at, updated_at FROM challenges WHERE authorization_id = ?`
 	rows, err := s.db.Query(challengeQuery, authzID)
@@ -383,14 +383,14 @@ func (s *SQLiteStorage) GetAuthorization(authzID string) (*ServerAuthorization, 
 		return nil, fmt.Errorf("failed to get challenges: %w", err)
 	}
 	defer rows.Close()
-	
+
 	var challenges []Challenge
 	for rows.Next() {
 		var serverChallenge ServerChallenge
 		var keyAuth sql.NullString
 		var validatedAt sql.NullTime
 		var errorDetail sql.NullString
-		
+
 		err := rows.Scan(
 			&serverChallenge.ID,
 			&serverChallenge.Type,
@@ -405,35 +405,35 @@ func (s *SQLiteStorage) GetAuthorization(authzID string) (*ServerAuthorization, 
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan challenge: %w", err)
 		}
-		
+
 		if keyAuth.Valid {
 			serverChallenge.KeyAuthorization = keyAuth.String
 		}
-		
+
 		if validatedAt.Valid {
 			serverChallenge.Validated = &validatedAt.Time
 		}
-		
+
 		if errorDetail.Valid && errorDetail.String != "" {
 			var problemDetails ProblemDetails
 			if err := json.Unmarshal([]byte(errorDetail.String), &problemDetails); err == nil {
 				serverChallenge.Error = &problemDetails
 			}
 		}
-		
+
 		// Convert ServerChallenge to Challenge for client response
 		challenge := serverChallenge.Challenge
 		// Set the URL using the server challenge ID
 		challenge.URL = fmt.Sprintf("%s/acme/chall/%s", s.baseURL, serverChallenge.ID)
 		challenges = append(challenges, challenge)
 	}
-	
+
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("error iterating challenges: %w", err)
 	}
-	
+
 	authz.Challenges = challenges
-	
+
 	return &authz, nil
 }
 
@@ -449,9 +449,9 @@ func (s *SQLiteStorage) StoreChallenge(challengeID string, challenge *ServerChal
 		INSERT OR REPLACE INTO challenges (id, authorization_id, type, status, token, key_authorization, validated_at, error_detail, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
 	`
-	
+
 	errorJSON, _ := json.Marshal(challenge.Error)
-	
+
 	_, err := s.db.Exec(query, challengeID, challenge.AuthzID, challenge.Type, challenge.Status,
 		challenge.Token, challenge.KeyAuthorization, challenge.Validated, string(errorJSON))
 	return err
@@ -459,10 +459,10 @@ func (s *SQLiteStorage) StoreChallenge(challengeID string, challenge *ServerChal
 
 func (s *SQLiteStorage) GetChallenge(challengeID string) (*ServerChallenge, error) {
 	query := `SELECT id, authorization_id, type, status, token, key_authorization, validated_at, error_detail FROM challenges WHERE id = ?`
-	
+
 	var challenge ServerChallenge
 	var errorJSON string
-	
+
 	err := s.db.QueryRow(query, challengeID).Scan(
 		&challenge.ID,
 		&challenge.AuthzID,
@@ -473,24 +473,24 @@ func (s *SQLiteStorage) GetChallenge(challengeID string) (*ServerChallenge, erro
 		&challenge.Validated,
 		&errorJSON,
 	)
-	
+
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, fmt.Errorf("challenge not found")
 		}
 		return nil, err
 	}
-	
+
 	// Parse error JSON if present
 	if errorJSON != "" {
 		if err := json.Unmarshal([]byte(errorJSON), &challenge.Error); err != nil {
 			s.logger.Warn("Failed to parse challenge error", "error", err)
 		}
 	}
-	
+
 	// Set the URL for the challenge
 	challenge.URL = fmt.Sprintf("%s/acme/chall/%s", s.baseURL, challenge.ID)
-	
+
 	return &challenge, nil
 }
 
@@ -519,7 +519,7 @@ func (s *SQLiteStorage) ValidateAndDeleteNonce(nonce string) error {
 		return err
 	}
 	defer tx.Rollback()
-	
+
 	// Check if nonce exists and is not expired
 	var expiresAt time.Time
 	err = tx.QueryRow("SELECT expires_at FROM nonces WHERE nonce = ?", nonce).Scan(&expiresAt)
@@ -529,17 +529,17 @@ func (s *SQLiteStorage) ValidateAndDeleteNonce(nonce string) error {
 		}
 		return err
 	}
-	
+
 	if time.Now().After(expiresAt) {
 		return fmt.Errorf("nonce expired")
 	}
-	
+
 	// Delete nonce (one-time use)
 	_, err = tx.Exec("DELETE FROM nonces WHERE nonce = ?", nonce)
 	if err != nil {
 		return err
 	}
-	
+
 	return tx.Commit()
 }
 
@@ -549,30 +549,30 @@ func (s *SQLiteStorage) CleanupExpiredNonces() error {
 	if err != nil {
 		return err
 	}
-	
+
 	rowsAffected, _ := result.RowsAffected()
 	if rowsAffected > 0 {
 		s.logger.Debug("Cleaned up expired nonces", "count", rowsAffected)
 	}
-	
+
 	return nil
 }
 
 // Management API methods
 func (s *SQLiteStorage) GetAllAccounts() ([]*ServerAccount, error) {
 	query := `SELECT id, public_key_jwk, contact, status, created_at, updated_at FROM accounts ORDER BY created_at DESC`
-	
+
 	rows, err := s.db.Query(query)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	
+
 	var accounts []*ServerAccount
 	for rows.Next() {
 		var account ServerAccount
 		var publicKeyJSON, contactJSON string
-		
+
 		err := rows.Scan(
 			&account.ID,
 			&publicKeyJSON,
@@ -584,19 +584,19 @@ func (s *SQLiteStorage) GetAllAccounts() ([]*ServerAccount, error) {
 		if err != nil {
 			continue
 		}
-		
+
 		// Parse JSON fields
 		if err := json.Unmarshal([]byte(publicKeyJSON), &account.Key); err != nil {
 			continue
 		}
-		
+
 		if contactJSON != "" {
 			json.Unmarshal([]byte(contactJSON), &account.Contact)
 		}
-		
+
 		accounts = append(accounts, &account)
 	}
-	
+
 	return accounts, nil
 }
 
@@ -608,18 +608,18 @@ func (s *SQLiteStorage) GetAllCertificates() ([]*CertificateInfo, error) {
 		LEFT JOIN accounts a ON c.account_id = a.id
 		ORDER BY c.issued_at DESC
 	`
-	
+
 	rows, err := s.db.Query(query)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	
+
 	var certificates []*CertificateInfo
 	for rows.Next() {
 		var cert CertificateInfo
 		var domainsJSON, contactJSON sql.NullString
-		
+
 		err := rows.Scan(
 			&cert.ID,
 			&cert.AccountID,
@@ -634,20 +634,20 @@ func (s *SQLiteStorage) GetAllCertificates() ([]*CertificateInfo, error) {
 		if err != nil {
 			continue
 		}
-		
+
 		// Parse domains JSON
 		if domainsJSON.Valid {
 			json.Unmarshal([]byte(domainsJSON.String), &cert.Domains)
 		}
-		
+
 		// Parse contact JSON
 		if contactJSON.Valid {
 			json.Unmarshal([]byte(contactJSON.String), &cert.AccountContact)
 		}
-		
+
 		certificates = append(certificates, &cert)
 	}
-	
+
 	return certificates, nil
 }
 
@@ -665,31 +665,31 @@ func (s *SQLiteStorage) RevokeCertificate(certID string, reason int) error {
 
 func (s *SQLiteStorage) GetStatistics() (*Statistics, error) {
 	stats := &Statistics{}
-	
+
 	// Count active accounts
 	err := s.db.QueryRow("SELECT COUNT(*) FROM accounts WHERE status = 'valid'").Scan(&stats.ActiveAccounts)
 	if err != nil {
 		return nil, err
 	}
-	
+
 	// Count valid certificates
 	err = s.db.QueryRow("SELECT COUNT(*) FROM certificates WHERE status = 'valid'").Scan(&stats.ValidCertificates)
 	if err != nil {
 		return nil, err
 	}
-	
+
 	// Count expired certificates
 	err = s.db.QueryRow("SELECT COUNT(*) FROM certificates WHERE expires_at < CURRENT_TIMESTAMP AND status = 'valid'").Scan(&stats.ExpiredCertificates)
 	if err != nil {
 		return nil, err
 	}
-	
+
 	// Count revoked certificates
 	err = s.db.QueryRow("SELECT COUNT(*) FROM certificates WHERE status = 'revoked'").Scan(&stats.RevokedCertificates)
 	if err != nil {
 		return nil, err
 	}
-	
+
 	return stats, nil
 }
 

@@ -16,8 +16,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/shibukawayoshiki/myencrypt2/internal/config"
-	"github.com/shibukawayoshiki/myencrypt2/internal/logger"
+	"github.com/shibukawa/myencrypt/internal/config"
+	"github.com/shibukawa/myencrypt/internal/logger"
 )
 
 // Certificate represents an individual certificate
@@ -46,7 +46,7 @@ type CertificateManager struct {
 func NewCertificateManager(cfg *config.Config, log *logger.Logger, caManager *CAManager) *CertificateManager {
 	certDir := filepath.Join(cfg.GetCertStorePath(), "certificates")
 	os.MkdirAll(certDir, 0755)
-	
+
 	return &CertificateManager{
 		config:       cfg,
 		logger:       log.WithComponent("cert-manager"),
@@ -81,7 +81,7 @@ func (cm *CertificateManager) GenerateCertificate(domain string) (*Certificate, 
 	// Create certificate template
 	// Construct base URLs for CRL and OCSP
 	baseURL := fmt.Sprintf("http://localhost:%d", cm.config.HTTPPort)
-	
+
 	template := x509.Certificate{
 		SerialNumber: serialNumber,
 		Subject: pkix.Name{
@@ -98,17 +98,17 @@ func (cm *CertificateManager) GenerateCertificate(domain string) (*Certificate, 
 		KeyUsage:           x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
 		ExtKeyUsage:        []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth},
 		SignatureAlgorithm: x509.ECDSAWithSHA256,
-		
+
 		// Add CRL Distribution Points for certificate revocation checking
 		CRLDistributionPoints: []string{
 			baseURL + "/crl/myencrypt.crl",
 		},
-		
+
 		// Add OCSP Server for online certificate status checking
 		OCSPServer: []string{
 			baseURL + "/ocsp",
 		},
-		
+
 		// Add CA Issuers URI for certificate chain building
 		IssuingCertificateURL: []string{
 			baseURL + "/ca.crt",
@@ -287,39 +287,39 @@ func (cm *CertificateManager) saveCertificateToFile(cert *Certificate) error {
 // GetCACertificatePEM returns the PEM-encoded CA certificate
 func (cm *CombinedManager) GetCACertificatePEM() ([]byte, error) {
 	cm.caManager.logger.Debug("Getting CA certificate")
-	
+
 	caPath := filepath.Join(cm.caManager.config.GetCertStorePath(), "rootCA.pem")
 	caData, err := os.ReadFile(caPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read CA certificate: %w", err)
 	}
-	
+
 	return caData, nil
 }
 
 // GetCAInfo returns information about the CA certificate
 func (cm *CombinedManager) GetCAInfo() (map[string]interface{}, error) {
 	cm.caManager.logger.Debug("Getting CA certificate info")
-	
+
 	caCert, err := cm.GetCACertificate()
 	if err != nil {
 		return nil, err
 	}
-	
+
 	// Parse the CA certificate - caCert.Certificate is already *x509.Certificate
 	cert := caCert.Certificate
-	
+
 	info := map[string]interface{}{
-		"subject":       cert.Subject.String(),
-		"issuer":        cert.Issuer.String(),
-		"serial_number": cert.SerialNumber.String(),
-		"not_before":    cert.NotBefore,
-		"not_after":     cert.NotAfter,
-		"is_ca":         cert.IsCA,
-		"key_usage":     cert.KeyUsage,
+		"subject":             cert.Subject.String(),
+		"issuer":              cert.Issuer.String(),
+		"serial_number":       cert.SerialNumber.String(),
+		"not_before":          cert.NotBefore,
+		"not_after":           cert.NotAfter,
+		"is_ca":               cert.IsCA,
+		"key_usage":           cert.KeyUsage,
 		"signature_algorithm": cert.SignatureAlgorithm.String(),
 	}
-	
+
 	// Calculate expiry information
 	now := time.Now()
 	if cert.NotAfter.After(now) {
@@ -332,14 +332,14 @@ func (cm *CombinedManager) GetCAInfo() (map[string]interface{}, error) {
 		info["remaining_hours"] = 0
 		info["remaining_days"] = 0
 	}
-	
+
 	return info, nil
 }
 
 // RegenerateCA regenerates the CA certificate and private key
 func (cm *CombinedManager) RegenerateCA() error {
 	cm.caManager.logger.Info("Regenerating CA certificate")
-	
+
 	// Remove existing CA files
 	caFiles := []string{"rootCA.pem", "rootCA-key.pem"}
 	for _, file := range caFiles {
@@ -348,12 +348,12 @@ func (cm *CombinedManager) RegenerateCA() error {
 			cm.caManager.logger.Warn("Failed to remove existing CA file", "file", file, "error", err)
 		}
 	}
-	
+
 	// Reinitialize CA
 	if err := cm.InitializeCA(); err != nil {
 		return fmt.Errorf("failed to regenerate CA: %w", err)
 	}
-	
+
 	cm.caManager.logger.Info("CA certificate regenerated successfully")
 	return nil
 }
@@ -362,14 +362,14 @@ func (cm *CombinedManager) RegenerateCA() error {
 func (cm *CertificateManager) ListCertificates() (map[string]*Certificate, error) {
 	cm.mu.RLock()
 	defer cm.mu.RUnlock()
-	
+
 	certificates := make(map[string]*Certificate)
-	
+
 	// Copy certificates from memory cache
 	for domain, cert := range cm.certificates {
 		certificates[domain] = cert
 	}
-	
+
 	cm.logger.Debug("Listed certificates", "count", len(certificates))
 	return certificates, nil
 }
@@ -378,12 +378,12 @@ func (cm *CertificateManager) ListCertificates() (map[string]*Certificate, error
 func (cm *CertificateManager) GetCertificate(domain string) (*Certificate, error) {
 	cm.mu.RLock()
 	defer cm.mu.RUnlock()
-	
+
 	cert, exists := cm.certificates[domain]
 	if !exists {
 		return nil, fmt.Errorf("certificate not found for domain: %s", domain)
 	}
-	
+
 	cm.logger.Debug("Retrieved certificate", "domain", domain)
 	return cert, nil
 }
@@ -392,29 +392,29 @@ func (cm *CertificateManager) GetCertificate(domain string) (*Certificate, error
 func (cm *CertificateManager) DeleteCertificate(domain string) error {
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
-	
+
 	// Check if certificate exists
 	if _, exists := cm.certificates[domain]; !exists {
 		return fmt.Errorf("certificate not found for domain: %s", domain)
 	}
-	
+
 	// Remove from memory cache
 	delete(cm.certificates, domain)
-	
+
 	// Remove certificate file if it exists
 	certPath := filepath.Join(cm.certDir, fmt.Sprintf("%s.pem", domain))
 	if err := os.Remove(certPath); err != nil && !os.IsNotExist(err) {
 		cm.logger.Error("Failed to remove certificate file", "error", err, "path", certPath)
 		// Don't return error as memory cleanup was successful
 	}
-	
+
 	// Remove private key file if it exists
 	keyPath := filepath.Join(cm.certDir, fmt.Sprintf("%s.key", domain))
 	if err := os.Remove(keyPath); err != nil && !os.IsNotExist(err) {
 		cm.logger.Error("Failed to remove private key file", "error", err, "path", keyPath)
 		// Don't return error as memory cleanup was successful
 	}
-	
+
 	cm.logger.Info("Certificate deleted", "domain", domain)
 	return nil
 }
@@ -450,25 +450,25 @@ func (cm *CertificateManager) GenerateCertificateFromCSR(csr *x509.CertificateRe
 
 	// Create certificate template based on CSR
 	template := x509.Certificate{
-		SerialNumber: serialNumber,
-		Subject:      csr.Subject,
-		DNSNames:     csr.DNSNames,
-		NotBefore:    time.Now(),
-		NotAfter:     time.Now().Add(cm.caManager.config.IndividualCertTTL),
-		KeyUsage:     x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
-		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth},
+		SerialNumber:       serialNumber,
+		Subject:            csr.Subject,
+		DNSNames:           csr.DNSNames,
+		NotBefore:          time.Now(),
+		NotAfter:           time.Now().Add(cm.caManager.config.IndividualCertTTL),
+		KeyUsage:           x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:        []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth},
 		SignatureAlgorithm: x509.ECDSAWithSHA256,
-		
+
 		// Add CRL Distribution Points for certificate revocation checking
 		CRLDistributionPoints: []string{
 			baseURL + "/crl/myencrypt.crl",
 		},
-		
+
 		// Add OCSP Server for online certificate status checking
 		OCSPServer: []string{
 			baseURL + "/ocsp",
 		},
-		
+
 		// Add CA Issuers URI for certificate chain building
 		IssuingCertificateURL: []string{
 			baseURL + "/ca.crt",
@@ -492,9 +492,9 @@ func (cm *CertificateManager) GenerateCertificateFromCSR(csr *x509.CertificateRe
 		return nil, fmt.Errorf("failed to parse certificate: %w", err)
 	}
 
-	cm.caManager.logger.Info("Certificate generated successfully from CSR", 
-		"domain", domain, 
-		"serial", cert.SerialNumber, 
+	cm.caManager.logger.Info("Certificate generated successfully from CSR",
+		"domain", domain,
+		"serial", cert.SerialNumber,
 		"valid_until", cert.NotAfter)
 
 	// Note: We don't have the private key since it was generated by the client

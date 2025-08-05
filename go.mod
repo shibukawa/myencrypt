@@ -1,4 +1,4 @@
-module github.com/shibukawayoshiki/myencrypt2
+module github.com/shibukawa/myencrypt
 
 go 1.24.5
 

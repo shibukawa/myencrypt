@@ -18,10 +18,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/shibukawa/myencrypt/internal/certmanager"
+	"github.com/shibukawa/myencrypt/internal/config"
+	"github.com/shibukawa/myencrypt/internal/logger"
 	"gopkg.in/square/go-jose.v2"
-	"github.com/shibukawayoshiki/myencrypt2/internal/certmanager"
-	"github.com/shibukawayoshiki/myencrypt2/internal/config"
-	"github.com/shibukawayoshiki/myencrypt2/internal/logger"
 )
 
 // Server represents the ACME server
@@ -33,7 +33,7 @@ type Server struct {
 	logger         *logger.Logger
 	baseURL        string
 	storage        Storage
-	
+
 	// Legacy in-memory storage for backward compatibility (optional)
 	// These will be deprecated in favor of persistent storage
 	accounts       map[string]*ServerAccount
@@ -42,7 +42,7 @@ type Server struct {
 	challenges     map[string]*ServerChallenge
 	certificates   map[string][]byte // Certificate storage (orderID -> PEM chain)
 	nonces         map[string]time.Time
-	
+
 	// Mutexes for thread safety (for legacy storage)
 	accountsMu       sync.RWMutex
 	ordersMu         sync.RWMutex
@@ -65,7 +65,7 @@ func NewServer(cfg *config.Config, certMgr certmanager.Manager, log *logger.Logg
 			baseURL = fmt.Sprintf("http://myencrypt:%d", cfg.HTTPPort)
 		}
 	}
-	
+
 	// Initialize SQLite storage
 	var storage Storage
 	sqliteStorage, err := NewSQLiteStorage(cfg, log, baseURL)
@@ -82,11 +82,11 @@ func NewServer(cfg *config.Config, certMgr certmanager.Manager, log *logger.Logg
 	} else {
 		storage = sqliteStorage
 	}
-	
+
 	// Initialize renewal manager
 	renewalConfig := certmanager.DefaultRenewalConfig()
 	renewalManager := certmanager.NewRenewalManager(certMgr, *log, renewalConfig)
-	
+
 	return &Server{
 		config:         cfg,
 		certManager:    certMgr,
@@ -113,7 +113,7 @@ func (s *Server) GetDirectory() *Directory {
 		RevokeCert: s.baseURL + "/acme/revoke-cert",
 		KeyChange:  s.baseURL + "/acme/key-change",
 		Meta: &DirectoryMeta{
-			Website:                 "https://github.com/shibukawayoshiki/myencrypt2",
+			Website:                 "https://github.com/shibukawa/myencrypt",
 			ExternalAccountRequired: false,
 		},
 		ExternalAccountRequired: false,
@@ -127,17 +127,17 @@ func (s *Server) GenerateNonce() (string, error) {
 	if _, err := rand.Read(bytes); err != nil {
 		return "", fmt.Errorf("failed to generate nonce: %w", err)
 	}
-	
+
 	nonce := base64.URLEncoding.EncodeToString(bytes)
-	
+
 	// Store nonce with expiration time (5 minutes)
 	s.noncesMu.Lock()
 	s.nonces[nonce] = time.Now().Add(5 * time.Minute)
 	s.noncesMu.Unlock()
-	
+
 	// Clean up expired nonces
 	go s.cleanupExpiredNonces()
-	
+
 	return nonce, nil
 }
 
@@ -145,7 +145,7 @@ func (s *Server) GenerateNonce() (string, error) {
 func (s *Server) ValidateNonce(nonce string) error {
 	s.noncesMu.Lock()
 	defer s.noncesMu.Unlock()
-	
+
 	expiry, exists := s.nonces[nonce]
 	if !exists {
 		return &ProblemDetails{
@@ -155,7 +155,7 @@ func (s *Server) ValidateNonce(nonce string) error {
 			Detail: "The nonce is invalid or has already been used",
 		}
 	}
-	
+
 	if time.Now().After(expiry) {
 		delete(s.nonces, nonce)
 		return &ProblemDetails{
@@ -165,7 +165,7 @@ func (s *Server) ValidateNonce(nonce string) error {
 			Detail: "The nonce has expired",
 		}
 	}
-	
+
 	// Consume the nonce (one-time use)
 	delete(s.nonces, nonce)
 	return nil
@@ -175,7 +175,7 @@ func (s *Server) ValidateNonce(nonce string) error {
 func (s *Server) cleanupExpiredNonces() {
 	s.noncesMu.Lock()
 	defer s.noncesMu.Unlock()
-	
+
 	now := time.Now()
 	for nonce, expiry := range s.nonces {
 		if now.After(expiry) {
@@ -191,7 +191,7 @@ func (s *Server) CreateAccount(req *AccountRequest, jwk *JSONWebKey) (*Account, 
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate account ID: %w", err)
 	}
-	
+
 	account := &Account{
 		ID:        accountID,
 		Key:       jwk,
@@ -200,11 +200,11 @@ func (s *Server) CreateAccount(req *AccountRequest, jwk *JSONWebKey) (*Account, 
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
 	}
-	
+
 	serverAccount := &ServerAccount{
 		Account: *account,
 	}
-	
+
 	// Store in persistent storage first
 	if s.storage != nil {
 		if err := s.storage.StoreAccount(accountID, serverAccount); err != nil {
@@ -213,14 +213,14 @@ func (s *Server) CreateAccount(req *AccountRequest, jwk *JSONWebKey) (*Account, 
 			s.logger.Debug("Account stored in persistent storage", "account_id", accountID)
 		}
 	}
-	
+
 	// Also store in memory for backward compatibility
 	s.accountsMu.Lock()
 	s.accounts[accountID] = serverAccount
 	s.accountsMu.Unlock()
-	
+
 	s.logger.Info("Created new ACME account", "accountId", accountID, "contact", req.Contact)
-	
+
 	return account, nil
 }
 
@@ -234,12 +234,12 @@ func (s *Server) getAuthorizationForChallenge(authzID string) (*ServerAuthorizat
 		}
 		s.logger.Debug("Authorization not found in persistent storage, checking memory", "authz_id", authzID)
 	}
-	
+
 	// Fallback to memory storage
 	s.authorizationsMu.RLock()
 	authz, exists := s.authorizations[authzID]
 	s.authorizationsMu.RUnlock()
-	
+
 	if !exists {
 		return nil, &ProblemDetails{
 			Type:   ErrorTypeAccountDoesNotExist,
@@ -248,7 +248,7 @@ func (s *Server) getAuthorizationForChallenge(authzID string) (*ServerAuthorizat
 			Detail: fmt.Sprintf("Authorization %s not found", authzID),
 		}
 	}
-	
+
 	return authz, nil
 }
 
@@ -262,12 +262,12 @@ func (s *Server) getOrderForAuthorization(orderID string) (*ServerOrder, error) 
 		}
 		s.logger.Debug("Order not found in persistent storage, checking memory", "order_id", orderID)
 	}
-	
+
 	// Fallback to memory storage
 	s.ordersMu.RLock()
 	order, exists := s.orders[orderID]
 	s.ordersMu.RUnlock()
-	
+
 	if !exists {
 		return nil, &ProblemDetails{
 			Type:   ErrorTypeAccountDoesNotExist,
@@ -276,7 +276,7 @@ func (s *Server) getOrderForAuthorization(orderID string) (*ServerOrder, error) 
 			Detail: fmt.Sprintf("Order %s not found", orderID),
 		}
 	}
-	
+
 	return order, nil
 }
 
@@ -287,44 +287,44 @@ func (s *Server) generateKeyAuthorization(token string, jwk *JSONWebKey) (string
 	if err != nil {
 		return "", fmt.Errorf("failed to convert JWK: %w", err)
 	}
-	
+
 	// Create JWK thumbprint
 	thumbprint, err := joseJWK.Thumbprint(crypto.SHA256)
 	if err != nil {
 		return "", fmt.Errorf("failed to generate JWK thumbprint: %w", err)
 	}
-	
+
 	// Encode thumbprint as base64url
 	thumbprintB64 := base64.RawURLEncoding.EncodeToString(thumbprint)
-	
+
 	// Create key authorization: token + "." + base64url(JWK_thumbprint)
 	keyAuth := token + "." + thumbprintB64
-	
+
 	return keyAuth, nil
 }
 
 // convertToJoseJWK converts our JSONWebKey to jose.JSONWebKey
 func (s *Server) convertToJoseJWK(jwk *JSONWebKey) (*jose.JSONWebKey, error) {
 	s.logger.Debug("Converting JWK", "kty", jwk.Kty, "alg", jwk.Alg, "use", jwk.Use)
-	
+
 	// Check if JWK has required fields
 	if jwk.Kty == "" {
 		return nil, fmt.Errorf("JWK missing key type (kty)")
 	}
-	
+
 	// Convert to JSON and back to jose.JSONWebKey
 	jwkBytes, err := json.Marshal(jwk)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal JWK: %w", err)
 	}
-	
+
 	s.logger.Debug("JWK JSON", "json", string(jwkBytes))
-	
+
 	var joseJWK jose.JSONWebKey
 	if err := json.Unmarshal(jwkBytes, &joseJWK); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal to jose.JSONWebKey: %w", err)
 	}
-	
+
 	return &joseJWK, nil
 }
 
@@ -336,7 +336,7 @@ func (s *Server) updateChallengeInStorage(challenge *ServerChallenge) {
 			s.logger.Error("Failed to update challenge in persistent storage", "error", err, "challenge_id", challenge.ID)
 		}
 	}
-	
+
 	// Update in memory storage
 	s.challengesMu.Lock()
 	s.challenges[challenge.ID] = challenge
@@ -346,14 +346,14 @@ func (s *Server) updateChallengeInStorage(challenge *ServerChallenge) {
 // validateChallenge performs the actual challenge validation
 func (s *Server) validateChallenge(challenge *ServerChallenge, authz *ServerAuthorization) {
 	s.logger.Info("Starting challenge validation", "challenge_id", challenge.ID, "type", challenge.Type, "domain", authz.Identifier.Value)
-	
+
 	// Update challenge status to processing at the start of validation
 	challenge.Status = StatusProcessing
 	challenge.UpdatedAt = time.Now()
 	s.updateChallengeInStorage(challenge)
-	
+
 	var validationErr error
-	
+
 	switch challenge.Type {
 	case ChallengeTypeHTTP01:
 		validationErr = s.validateHTTP01Challenge(challenge, authz)
@@ -364,7 +364,7 @@ func (s *Server) validateChallenge(challenge *ServerChallenge, authz *ServerAuth
 	default:
 		validationErr = fmt.Errorf("unsupported challenge type: %s", challenge.Type)
 	}
-	
+
 	// Update challenge status based on validation result
 	now := time.Now()
 	if validationErr != nil {
@@ -382,10 +382,10 @@ func (s *Server) validateChallenge(challenge *ServerChallenge, authz *ServerAuth
 		challenge.Validated = &now
 		challenge.Error = nil
 	}
-	
+
 	challenge.UpdatedAt = now
 	s.updateChallengeInStorage(challenge)
-	
+
 	// Update the challenge in the authorization object
 	for i, authzChallenge := range authz.Challenges {
 		if authzChallenge.Type == challenge.Type && authzChallenge.Token == challenge.Token {
@@ -396,7 +396,7 @@ func (s *Server) validateChallenge(challenge *ServerChallenge, authz *ServerAuth
 			break
 		}
 	}
-	
+
 	// Update authorization status after challenge status is updated
 	if challenge.Status == StatusValid {
 		s.updateAuthorizationStatus(authz)
@@ -408,7 +408,7 @@ func (s *Server) validateHTTP01Challenge(challenge *ServerChallenge, authz *Serv
 	domain := authz.Identifier.Value
 	token := challenge.Token
 	expectedKeyAuth := challenge.KeyAuthorization
-	
+
 	// Construct the validation URL
 	// In test environment, allow custom base URL for HTTP-01 challenges
 	var validationURL string
@@ -419,13 +419,13 @@ func (s *Server) validateHTTP01Challenge(challenge *ServerChallenge, authz *Serv
 		// Production environment: use standard HTTP-01 URL
 		validationURL = fmt.Sprintf("http://%s/.well-known/acme-challenge/%s", domain, token)
 	}
-	
-	s.logger.Debug("Validating HTTP-01 challenge", 
-		"url", validationURL, 
+
+	s.logger.Debug("Validating HTTP-01 challenge",
+		"url", validationURL,
 		"expected", expectedKeyAuth,
 		"domain", domain,
 		"token", token)
-	
+
 	// Create HTTP client with timeout
 	client := &http.Client{
 		Timeout: 10 * time.Second,
@@ -433,19 +433,19 @@ func (s *Server) validateHTTP01Challenge(challenge *ServerChallenge, authz *Serv
 			DisableKeepAlives: true,
 		},
 	}
-	
+
 	// Retry configuration (optimized for fast testing)
-	maxRetries := 2 // Reduced from 3 to 2 for faster testing
-	baseDelay := 10 * time.Millisecond // Further reduced for testing
-	maxDelay := 50 * time.Millisecond // Much lower max delay
+	maxRetries := 2                       // Reduced from 3 to 2 for faster testing
+	baseDelay := 10 * time.Millisecond    // Further reduced for testing
+	maxDelay := 50 * time.Millisecond     // Much lower max delay
 	initialDelay := 20 * time.Millisecond // Reduced initial delay
-	
+
 	// Wait before first attempt to give the ACME client time to set up the challenge response
 	s.logger.Debug("Waiting before HTTP-01 challenge validation", "initial_delay", initialDelay, "url", validationURL)
 	time.Sleep(initialDelay)
-	
+
 	var lastErr error
-	
+
 	for attempt := 0; attempt < maxRetries; attempt++ {
 		if attempt > 0 {
 			// Use fixed short delay instead of exponential backoff for testing
@@ -453,34 +453,34 @@ func (s *Server) validateHTTP01Challenge(challenge *ServerChallenge, authz *Serv
 			if delay > maxDelay {
 				delay = maxDelay
 			}
-			
-			s.logger.Debug("Retrying HTTP-01 challenge validation", 
-				"attempt", attempt+1, 
-				"max_retries", maxRetries, 
+
+			s.logger.Debug("Retrying HTTP-01 challenge validation",
+				"attempt", attempt+1,
+				"max_retries", maxRetries,
 				"delay", delay,
 				"url", validationURL)
-			
+
 			time.Sleep(delay)
 		}
-		
+
 		// Make HTTP request
-		s.logger.Debug("Making HTTP-01 challenge request", 
-			"attempt", attempt+1, 
+		s.logger.Debug("Making HTTP-01 challenge request",
+			"attempt", attempt+1,
 			"url", validationURL)
-		
+
 		resp, err := client.Get(validationURL)
 		if err != nil {
 			lastErr = fmt.Errorf("failed to fetch challenge response (attempt %d/%d): %w", attempt+1, maxRetries, err)
-			s.logger.Debug("HTTP-01 challenge request failed", 
-				"attempt", attempt+1, 
+			s.logger.Debug("HTTP-01 challenge request failed",
+				"attempt", attempt+1,
 				"error", err,
 				"url", validationURL)
 			continue
 		}
-		
+
 		func() {
 			defer resp.Body.Close()
-			
+
 			if resp.StatusCode != http.StatusOK {
 				// Read response body for debugging
 				body, _ := io.ReadAll(resp.Body)
@@ -488,17 +488,17 @@ func (s *Server) validateHTTP01Challenge(challenge *ServerChallenge, authz *Serv
 				if len(bodyStr) > 200 {
 					bodyStr = bodyStr[:200] + "..."
 				}
-				
+
 				lastErr = fmt.Errorf("challenge response returned status %d (attempt %d/%d)", resp.StatusCode, attempt+1, maxRetries)
-				s.logger.Debug("HTTP-01 challenge returned non-200 status", 
-					"attempt", attempt+1, 
+				s.logger.Debug("HTTP-01 challenge returned non-200 status",
+					"attempt", attempt+1,
 					"status", resp.StatusCode,
 					"response_body", bodyStr,
 					"content_type", resp.Header.Get("Content-Type"),
 					"url", validationURL)
 				return
 			}
-			
+
 			// Read response body
 			body, err := io.ReadAll(resp.Body)
 			if err != nil {
@@ -506,31 +506,31 @@ func (s *Server) validateHTTP01Challenge(challenge *ServerChallenge, authz *Serv
 				s.logger.Debug("HTTP-01 challenge response read failed", "attempt", attempt+1, "error", err)
 				return
 			}
-			
+
 			// Trim whitespace and compare
 			actualKeyAuth := strings.TrimSpace(string(body))
 			if actualKeyAuth != expectedKeyAuth {
 				lastErr = fmt.Errorf("key authorization mismatch (attempt %d/%d): expected %s, got %s", attempt+1, maxRetries, expectedKeyAuth, actualKeyAuth)
-				s.logger.Debug("HTTP-01 challenge key authorization mismatch", 
+				s.logger.Debug("HTTP-01 challenge key authorization mismatch",
 					"attempt", attempt+1,
 					"expected", expectedKeyAuth,
 					"actual", actualKeyAuth)
 				return
 			}
-			
+
 			// Success!
-			s.logger.Debug("HTTP-01 challenge validation successful", 
+			s.logger.Debug("HTTP-01 challenge validation successful",
 				"attempt", attempt+1,
 				"url", validationURL)
 			lastErr = nil
 		}()
-		
+
 		// If no error, validation succeeded
 		if lastErr == nil {
 			return nil
 		}
 	}
-	
+
 	// All retries failed
 	return fmt.Errorf("HTTP-01 challenge validation failed after %d attempts: %w", maxRetries, lastErr)
 }
@@ -539,24 +539,24 @@ func (s *Server) validateHTTP01Challenge(challenge *ServerChallenge, authz *Serv
 func (s *Server) validateDNS01Challenge(challenge *ServerChallenge, authz *ServerAuthorization) error {
 	domain := authz.Identifier.Value
 	expectedKeyAuth := challenge.KeyAuthorization
-	
+
 	// Calculate expected DNS record value
 	// DNS-01 uses SHA256 hash of key authorization
 	hash := crypto.SHA256.New()
 	hash.Write([]byte(expectedKeyAuth))
 	expectedValue := base64.RawURLEncoding.EncodeToString(hash.Sum(nil))
-	
+
 	// DNS record name: _acme-challenge.{domain}
 	recordName := "_acme-challenge." + domain
-	
+
 	s.logger.Debug("Validating DNS-01 challenge", "domain", domain, "record", recordName, "expected", expectedValue)
-	
+
 	// Query DNS TXT record
 	txtRecords, err := s.queryDNSTXTRecords(recordName)
 	if err != nil {
 		return fmt.Errorf("failed to query DNS TXT records for %s: %w", recordName, err)
 	}
-	
+
 	// Check if any TXT record matches expected value
 	for _, record := range txtRecords {
 		if record == expectedValue {
@@ -564,7 +564,7 @@ func (s *Server) validateDNS01Challenge(challenge *ServerChallenge, authz *Serve
 			return nil
 		}
 	}
-	
+
 	return fmt.Errorf("DNS TXT record not found or incorrect: expected %s in %s", expectedValue, recordName)
 }
 
@@ -572,37 +572,37 @@ func (s *Server) validateDNS01Challenge(challenge *ServerChallenge, authz *Serve
 func (s *Server) validateTLSALPN01Challenge(challenge *ServerChallenge, authz *ServerAuthorization) error {
 	domain := authz.Identifier.Value
 	expectedKeyAuth := challenge.KeyAuthorization
-	
+
 	s.logger.Debug("Validating TLS-ALPN-01 challenge", "domain", domain, "expected", expectedKeyAuth)
-	
+
 	// Calculate expected certificate extension value
 	hash := crypto.SHA256.New()
 	hash.Write([]byte(expectedKeyAuth))
 	expectedExtValue := hash.Sum(nil)
-	
+
 	s.logger.Debug("Expected extension value", "domain", domain, "value", fmt.Sprintf("%x", expectedExtValue))
-	
+
 	// Connect to domain on port 443 with ALPN extension
 	conn, err := s.connectTLSALPN(domain, "acme-tls/1")
 	if err != nil {
 		return fmt.Errorf("failed to establish TLS-ALPN connection to %s: %w", domain, err)
 	}
 	defer conn.Close()
-	
+
 	// Get peer certificate
 	state := conn.ConnectionState()
 	if len(state.PeerCertificates) == 0 {
 		return fmt.Errorf("no peer certificates received")
 	}
-	
+
 	cert := state.PeerCertificates[0]
-	
+
 	s.logger.Debug("Certificate details", "domain", domain, "subject", cert.Subject.String(), "extensions_count", len(cert.Extensions))
-	
+
 	// Check for ACME extension (1.3.6.1.5.5.7.1.31)
 	acmeExtOID := []int{1, 3, 6, 1, 5, 5, 7, 1, 31}
 	var foundExtValue []byte
-	
+
 	for i, ext := range cert.Extensions {
 		s.logger.Debug("Certificate extension", "domain", domain, "index", i, "oid", ext.Id.String(), "critical", ext.Critical, "value_hex", fmt.Sprintf("%x", ext.Value))
 		if ext.Id.Equal(acmeExtOID) {
@@ -610,13 +610,13 @@ func (s *Server) validateTLSALPN01Challenge(challenge *ServerChallenge, authz *S
 			break
 		}
 	}
-	
+
 	if foundExtValue == nil {
 		return fmt.Errorf("ACME extension not found in certificate")
 	}
-	
+
 	s.logger.Debug("Found extension value", "domain", domain, "value", fmt.Sprintf("%x", foundExtValue))
-	
+
 	// The extension value might be ASN.1 encoded as OCTET STRING
 	// Try to decode it if it starts with 0x04 (OCTET STRING tag)
 	actualExtValue := foundExtValue
@@ -628,13 +628,13 @@ func (s *Server) validateTLSALPN01Challenge(challenge *ServerChallenge, authz *S
 			s.logger.Debug("Decoded ASN.1 OCTET STRING", "domain", domain, "decoded_value", fmt.Sprintf("%x", actualExtValue))
 		}
 	}
-	
+
 	// Compare extension value
 	if !bytes.Equal(actualExtValue, expectedExtValue) {
 		s.logger.Error("Extension value mismatch", "domain", domain, "expected", fmt.Sprintf("%x", expectedExtValue), "found", fmt.Sprintf("%x", actualExtValue))
 		return fmt.Errorf("ACME extension value mismatch")
 	}
-	
+
 	s.logger.Info("TLS-ALPN-01 challenge validation successful", "domain", domain)
 	return nil
 }
@@ -642,10 +642,10 @@ func (s *Server) validateTLSALPN01Challenge(challenge *ServerChallenge, authz *S
 // updateAuthorizationStatus updates the authorization status based on challenge results
 func (s *Server) updateAuthorizationStatus(authz *ServerAuthorization) {
 	s.logger.Info("Updating authorization status", "authz_id", authz.ID, "current_status", authz.Status)
-	
+
 	allValid := true
 	anyValid := false
-	
+
 	for i, challenge := range authz.Challenges {
 		s.logger.Info("Challenge status check", "authz_id", authz.ID, "challenge_index", i, "challenge_type", challenge.Type, "status", challenge.Status)
 		if challenge.Status == StatusValid {
@@ -654,9 +654,9 @@ func (s *Server) updateAuthorizationStatus(authz *ServerAuthorization) {
 			allValid = false
 		}
 	}
-	
+
 	s.logger.Info("Authorization status calculation", "authz_id", authz.ID, "all_valid", allValid, "any_valid", anyValid)
-	
+
 	var newStatus string
 	if anyValid {
 		// In ACME, if any challenge is valid, the authorization is valid
@@ -678,26 +678,26 @@ func (s *Server) updateAuthorizationStatus(authz *ServerAuthorization) {
 	} else {
 		newStatus = StatusPending
 	}
-	
+
 	s.logger.Info("Authorization status decision", "authz_id", authz.ID, "old_status", authz.Status, "new_status", newStatus)
-	
+
 	if newStatus != authz.Status {
 		s.logger.Info("Updating authorization status", "authz_id", authz.ID, "old_status", authz.Status, "new_status", newStatus)
 		authz.Status = newStatus
 		authz.UpdatedAt = time.Now()
-		
+
 		// Update in persistent storage
 		if s.storage != nil {
 			if err := s.storage.StoreAuthorization(authz.ID, authz); err != nil {
 				s.logger.Error("Failed to update authorization in persistent storage", "error", err, "authz_id", authz.ID)
 			}
 		}
-		
+
 		// Update in memory storage
 		s.authorizationsMu.Lock()
 		s.authorizations[authz.ID] = authz
 		s.authorizationsMu.Unlock()
-		
+
 		// Check if we need to update the order status
 		s.updateOrderStatusForAuthorization(authz)
 	} else {
@@ -708,15 +708,15 @@ func (s *Server) updateAuthorizationStatus(authz *ServerAuthorization) {
 // updateOrderStatusForAuthorization updates the order status when an authorization changes
 func (s *Server) updateOrderStatusForAuthorization(authz *ServerAuthorization) {
 	s.logger.Debug("Updating order status for authorization", "authz_id", authz.ID, "order_id", authz.OrderID, "authz_status", authz.Status)
-	
+
 	order, err := s.getOrderForAuthorization(authz.OrderID)
 	if err != nil {
 		s.logger.Error("Failed to get order for authorization update", "error", err, "authz_id", authz.ID)
 		return
 	}
-	
+
 	s.logger.Debug("Current order status", "order_id", order.ID, "status", order.Status, "authorizations_count", len(order.Authorizations))
-	
+
 	// Check if all authorizations for this order are valid
 	allAuthzValid := true
 	validCount := 0
@@ -727,30 +727,30 @@ func (s *Server) updateOrderStatusForAuthorization(authz *ServerAuthorization) {
 			continue
 		}
 		authzID := parts[len(parts)-1]
-		
+
 		authzForOrder, err := s.getAuthorizationForChallenge(authzID)
 		if err != nil {
 			s.logger.Debug("Failed to get authorization for order check", "authz_id", authzID, "error", err)
 			allAuthzValid = false
 			break
 		}
-		
+
 		s.logger.Debug("Authorization status check", "authz_id", authzID, "status", authzForOrder.Status)
-		
+
 		if authzForOrder.Status != StatusValid {
 			allAuthzValid = false
 		} else {
 			validCount++
 		}
 	}
-	
+
 	s.logger.Debug("Authorization validation summary", "order_id", order.ID, "all_valid", allAuthzValid, "valid_count", validCount, "total_count", len(order.Authorizations))
-	
+
 	if allAuthzValid && order.Status == StatusPending {
 		s.logger.Info("All authorizations valid, updating order to ready", "order_id", order.ID)
 		order.Status = StatusReady
 		order.UpdatedAt = time.Now()
-		
+
 		// Update in persistent storage
 		if s.storage != nil {
 			if err := s.storage.StoreOrder(order.ID, order); err != nil {
@@ -759,12 +759,12 @@ func (s *Server) updateOrderStatusForAuthorization(authz *ServerAuthorization) {
 				s.logger.Debug("Order updated in persistent storage", "order_id", order.ID, "status", order.Status)
 			}
 		}
-		
+
 		// Update in memory storage
 		s.ordersMu.Lock()
 		s.orders[order.ID] = order
 		s.ordersMu.Unlock()
-		
+
 		s.logger.Info("Order status updated to ready", "order_id", order.ID)
 	} else {
 		s.logger.Debug("Order status not updated", "order_id", order.ID, "all_valid", allAuthzValid, "current_status", order.Status)
@@ -785,15 +785,15 @@ func (s *Server) validateCSR(csr *x509.CertificateRequest, order *ServerOrder) e
 
 	// Extract domains from CSR
 	var csrDomains []string
-	
+
 	// Add Common Name if present
 	if csr.Subject.CommonName != "" {
 		csrDomains = append(csrDomains, csr.Subject.CommonName)
 	}
-	
+
 	// Add Subject Alternative Names
 	csrDomains = append(csrDomains, csr.DNSNames...)
-	
+
 	// Remove duplicates
 	domainSet := make(map[string]bool)
 	var uniqueDomains []string
@@ -803,7 +803,7 @@ func (s *Server) validateCSR(csr *x509.CertificateRequest, order *ServerOrder) e
 			uniqueDomains = append(uniqueDomains, domain)
 		}
 	}
-	
+
 	// Check that CSR domains match order identifiers
 	if len(uniqueDomains) != len(order.Identifiers) {
 		return &ProblemDetails{
@@ -813,12 +813,12 @@ func (s *Server) validateCSR(csr *x509.CertificateRequest, order *ServerOrder) e
 			Detail: "CSR domain count does not match order identifiers",
 		}
 	}
-	
+
 	orderDomains := make(map[string]bool)
 	for _, identifier := range order.Identifiers {
 		orderDomains[identifier.Value] = true
 	}
-	
+
 	for _, domain := range uniqueDomains {
 		if !orderDomains[domain] {
 			return &ProblemDetails{
@@ -829,7 +829,7 @@ func (s *Server) validateCSR(csr *x509.CertificateRequest, order *ServerOrder) e
 			}
 		}
 	}
-	
+
 	s.logger.Debug("CSR validation successful", "domains", uniqueDomains)
 	return nil
 }
@@ -841,21 +841,21 @@ func (s *Server) generateCertificate(csr *x509.CertificateRequest, order *Server
 	for i, identifier := range order.Identifiers {
 		domains[i] = identifier.Value
 	}
-	
+
 	s.logger.Info("Generating certificate", "domains", domains, "order_id", order.ID)
-	
+
 	// Generate certificate using the certificate manager (use first domain as primary)
 	cert, err := s.certManager.GenerateCertificate(domains[0])
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate certificate: %w", err)
 	}
-	
+
 	// Get certificate chain in PEM format
 	certPEM, err := s.certManager.GetCertificateChain(cert)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get certificate chain: %w", err)
 	}
-	
+
 	s.logger.Info("Certificate generated successfully", "order_id", order.ID, "primary_domain", domains[0])
 	return certPEM, nil
 }
@@ -870,12 +870,12 @@ func (s *Server) storeCertificate(certID string, certBytes []byte) error {
 		}
 		s.logger.Debug("Certificate stored in persistent storage", "cert_id", certID)
 	}
-	
+
 	// Store in memory storage
 	s.certificatesMu.Lock()
 	s.certificates[certID] = certBytes
 	s.certificatesMu.Unlock()
-	
+
 	s.logger.Debug("Certificate stored in memory", "cert_id", certID, "size", len(certBytes))
 	return nil
 }
@@ -887,7 +887,7 @@ func (s *Server) queryDNSTXTRecords(name string) ([]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("DNS lookup failed: %w", err)
 	}
-	
+
 	s.logger.Debug("DNS TXT records found", "name", name, "records", txtRecords)
 	return txtRecords, nil
 }
@@ -899,32 +899,32 @@ func (s *Server) connectTLSALPN(domain, alpnProto string) (*tls.Conn, error) {
 		InsecureSkipVerify: true, // For development/testing
 		ServerName:         domain,
 	}
-	
+
 	// Connect to domain:443
 	conn, err := tls.Dial("tcp", domain+":443", config)
 	if err != nil {
 		return nil, fmt.Errorf("TLS dial failed: %w", err)
 	}
-	
+
 	// Verify ALPN negotiation
 	state := conn.ConnectionState()
 	if state.NegotiatedProtocol != alpnProto {
 		conn.Close()
 		return nil, fmt.Errorf("ALPN negotiation failed: expected %s, got %s", alpnProto, state.NegotiatedProtocol)
 	}
-	
+
 	return conn, nil
 }
 
 // Start starts the ACME server and renewal manager
 func (s *Server) Start(ctx context.Context) error {
 	s.logger.Info("Starting ACME server", "base_url", s.baseURL)
-	
+
 	// Start renewal manager with context
 	if err := s.renewalManager.Start(ctx); err != nil {
 		return fmt.Errorf("failed to start renewal manager: %w", err)
 	}
-	
+
 	s.logger.Info("ACME server started successfully")
 	return nil
 }
@@ -932,13 +932,13 @@ func (s *Server) Start(ctx context.Context) error {
 // Stop stops the ACME server and renewal manager
 func (s *Server) Stop() error {
 	s.logger.Info("Stopping ACME server")
-	
+
 	// Stop renewal manager
 	if err := s.renewalManager.Stop(); err != nil {
 		s.logger.Error("Failed to stop renewal manager", "error", err)
 		// Continue with shutdown
 	}
-	
+
 	s.logger.Info("ACME server stopped")
 	return nil
 }
@@ -965,22 +965,22 @@ func (s *Server) GetAccount(accountID string) (*Account, error) {
 		serverAccount, err := s.storage.GetAccount(accountID)
 		if err == nil && serverAccount != nil {
 			s.logger.Debug("Account retrieved from persistent storage", "account_id", accountID)
-			
+
 			// Also update memory cache for performance
 			s.accountsMu.Lock()
 			s.accounts[accountID] = serverAccount
 			s.accountsMu.Unlock()
-			
+
 			return &serverAccount.Account, nil
 		}
 		s.logger.Debug("Account not found in persistent storage", "account_id", accountID, "error", err)
 	}
-	
+
 	// Fallback to memory storage
 	s.accountsMu.RLock()
 	serverAccount, exists := s.accounts[accountID]
 	s.accountsMu.RUnlock()
-	
+
 	if !exists {
 		return nil, &ProblemDetails{
 			Type:   ErrorTypeAccountDoesNotExist,
@@ -989,7 +989,7 @@ func (s *Server) GetAccount(accountID string) (*Account, error) {
 			Detail: fmt.Sprintf("Account with ID %s does not exist", accountID),
 		}
 	}
-	
+
 	return &serverAccount.Account, nil
 }
 
@@ -1000,7 +1000,7 @@ func (s *Server) CreateOrder(accountID string, req *OrderRequest) (*Order, error
 	if err != nil {
 		return nil, err
 	}
-	
+
 	// Validate identifiers
 	for _, identifier := range req.Identifiers {
 		if identifier.Type != "dns" {
@@ -1011,7 +1011,7 @@ func (s *Server) CreateOrder(accountID string, req *OrderRequest) (*Order, error
 				Detail: fmt.Sprintf("Identifier type %s is not supported", identifier.Type),
 			}
 		}
-		
+
 		// Check if domain is allowed
 		if !s.certManager.IsAllowedDomain(identifier.Value) {
 			return nil, &ProblemDetails{
@@ -1022,13 +1022,13 @@ func (s *Server) CreateOrder(accountID string, req *OrderRequest) (*Order, error
 			}
 		}
 	}
-	
+
 	// Generate order ID
 	orderID, err := s.generateID("order")
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate order ID: %w", err)
 	}
-	
+
 	// Create authorizations for each identifier
 	var authzURLs []string
 	for _, identifier := range req.Identifiers {
@@ -1036,7 +1036,7 @@ func (s *Server) CreateOrder(accountID string, req *OrderRequest) (*Order, error
 		if err != nil {
 			return nil, fmt.Errorf("failed to generate authorization ID: %w", err)
 		}
-		
+
 		authz := &ServerAuthorization{
 			Authorization: Authorization{
 				ID:         authzID,
@@ -1049,23 +1049,23 @@ func (s *Server) CreateOrder(accountID string, req *OrderRequest) (*Order, error
 			},
 			OrderID: orderID,
 		}
-		
+
 		// Create challenges for this authorization
 		// Enable all supported challenge types
 		challengeTypes := []string{ChallengeTypeHTTP01, ChallengeTypeDNS01, ChallengeTypeTLSALPN01}
 		var challenges []Challenge
-		
+
 		for _, challengeType := range challengeTypes {
 			challengeID, err := s.generateID("chall")
 			if err != nil {
 				return nil, fmt.Errorf("failed to generate challenge ID: %w", err)
 			}
-			
+
 			token, err := s.generateToken()
 			if err != nil {
 				return nil, fmt.Errorf("failed to generate challenge token: %w", err)
 			}
-			
+
 			// Create RFC 8555 compliant challenge object (for client response)
 			challenge := Challenge{
 				Type:   challengeType,
@@ -1073,9 +1073,9 @@ func (s *Server) CreateOrder(accountID string, req *OrderRequest) (*Order, error
 				Status: StatusPending,
 				Token:  token,
 			}
-			
+
 			challenges = append(challenges, challenge)
-			
+
 			// Create server challenge with additional internal fields
 			serverChallenge := &ServerChallenge{
 				Challenge: challenge,
@@ -1084,7 +1084,7 @@ func (s *Server) CreateOrder(accountID string, req *OrderRequest) (*Order, error
 				CreatedAt: time.Now(),
 				UpdatedAt: time.Now(),
 			}
-			
+
 			if s.storage != nil {
 				if err := s.storage.StoreChallenge(challengeID, serverChallenge); err != nil {
 					s.logger.Error("Failed to store challenge in persistent storage", "error", err, "challenge_id", challengeID)
@@ -1092,15 +1092,15 @@ func (s *Server) CreateOrder(accountID string, req *OrderRequest) (*Order, error
 					s.logger.Debug("Challenge stored in persistent storage", "challenge_id", challengeID, "type", challengeType)
 				}
 			}
-			
+
 			// Store challenge in memory for backward compatibility
 			s.challengesMu.Lock()
 			s.challenges[challengeID] = serverChallenge
 			s.challengesMu.Unlock()
 		}
-		
+
 		authz.Challenges = challenges
-		
+
 		// Store authorization in persistent storage first
 		if s.storage != nil {
 			if err := s.storage.StoreAuthorization(authzID, authz); err != nil {
@@ -1109,15 +1109,15 @@ func (s *Server) CreateOrder(accountID string, req *OrderRequest) (*Order, error
 				s.logger.Debug("Authorization stored in persistent storage", "authz_id", authzID)
 			}
 		}
-		
+
 		// Store authorization in memory for backward compatibility
 		s.authorizationsMu.Lock()
 		s.authorizations[authzID] = authz
 		s.authorizationsMu.Unlock()
-		
+
 		authzURLs = append(authzURLs, fmt.Sprintf("%s/acme/authz/%s", s.baseURL, authzID))
 	}
-	
+
 	// Create order
 	order := &Order{
 		ID:             orderID,
@@ -1132,13 +1132,13 @@ func (s *Server) CreateOrder(accountID string, req *OrderRequest) (*Order, error
 		CreatedAt:      time.Now(),
 		UpdatedAt:      time.Now(),
 	}
-	
+
 	s.logger.Info("Order finalize URL", "order_id", orderID, "finalize_url", order.Finalize, "base_url", s.baseURL)
-	
+
 	serverOrder := &ServerOrder{
 		Order: *order,
 	}
-	
+
 	// Store in persistent storage first
 	if s.storage != nil {
 		if err := s.storage.StoreOrder(orderID, serverOrder); err != nil {
@@ -1147,21 +1147,21 @@ func (s *Server) CreateOrder(accountID string, req *OrderRequest) (*Order, error
 			s.logger.Debug("Order stored in persistent storage", "order_id", orderID)
 		}
 	}
-	
+
 	// Also store in memory for backward compatibility
 	s.ordersMu.Lock()
 	s.orders[orderID] = serverOrder
 	s.ordersMu.Unlock()
-	
+
 	s.logger.Info("Created new certificate order", "orderId", orderID, "accountId", accountID, "identifiers", req.Identifiers)
-	
+
 	return order, nil
 }
 
 // GetOrder retrieves an order by ID
 func (s *Server) GetOrder(orderID string) (*Order, error) {
 	s.logger.Debug("GetOrder called", "orderID", orderID)
-	
+
 	// Try persistent storage first
 	if s.storage != nil {
 		s.logger.Debug("Checking persistent storage for order", "orderID", orderID)
@@ -1172,13 +1172,13 @@ func (s *Server) GetOrder(orderID string) (*Order, error) {
 		}
 		s.logger.Debug("Order not found in persistent storage, checking memory", "orderID", orderID, "error", err)
 	}
-	
+
 	// Fallback to memory storage
 	s.logger.Debug("Checking memory storage for order", "orderID", orderID)
 	s.ordersMu.RLock()
 	serverOrder, exists := s.orders[orderID]
 	s.ordersMu.RUnlock()
-	
+
 	if !exists {
 		s.logger.Debug("Order not found in memory storage", "orderID", orderID)
 		return nil, &ProblemDetails{
@@ -1188,7 +1188,7 @@ func (s *Server) GetOrder(orderID string) (*Order, error) {
 			Detail: fmt.Sprintf("Order with ID %s does not exist", orderID),
 		}
 	}
-	
+
 	s.logger.Info("Order found in memory storage", "orderID", orderID, "status", serverOrder.Status, "finalize_url", serverOrder.Finalize)
 	return &serverOrder.Order, nil
 }
@@ -1217,7 +1217,7 @@ func (s *Server) generateToken() (string, error) {
 func (s *Server) startNonceCleanup(ctx context.Context) {
 	ticker := time.NewTicker(1 * time.Minute)
 	defer ticker.Stop()
-	
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -1231,13 +1231,13 @@ func (s *Server) startNonceCleanup(ctx context.Context) {
 // Shutdown gracefully shuts down the ACME server
 func (s *Server) Shutdown() error {
 	s.logger.Info("Shutting down ACME server")
-	
+
 	// Close persistent storage
 	if s.storage != nil {
 		if err := s.storage.Close(); err != nil {
 			s.logger.Error("Error closing persistent storage", "error", err)
 		}
 	}
-	
+
 	return nil
 }

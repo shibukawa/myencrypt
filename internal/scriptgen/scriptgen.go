@@ -3,7 +3,7 @@ package scriptgen
 import (
 	"fmt"
 
-	"github.com/shibukawayoshiki/myencrypt2/internal/platform"
+	"github.com/shibukawa/myencrypt/internal/platform"
 )
 
 // Generator handles script generation for different platforms

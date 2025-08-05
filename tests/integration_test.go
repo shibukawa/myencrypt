@@ -8,23 +8,23 @@ import (
 	"crypto/tls"
 	"database/sql"
 	"fmt"
+	mathrand "math/rand"
 	"net/http"
 	"os"
 	"path/filepath"
 	"sync"
 	"testing"
 	"time"
-	mathrand "math/rand"
 
-	"golang.org/x/crypto/acme"
-	_ "github.com/mattn/go-sqlite3"
 	"github.com/gorilla/mux"
+	_ "github.com/mattn/go-sqlite3"
+	"golang.org/x/crypto/acme"
 
-	myacme "github.com/shibukawayoshiki/myencrypt2/internal/acme"
-	"github.com/shibukawayoshiki/myencrypt2/internal/certmanager"
-	"github.com/shibukawayoshiki/myencrypt2/internal/config"
-	"github.com/shibukawayoshiki/myencrypt2/internal/logger"
-	"github.com/shibukawayoshiki/myencrypt2/internal/management"
+	myacme "github.com/shibukawa/myencrypt/internal/acme"
+	"github.com/shibukawa/myencrypt/internal/certmanager"
+	"github.com/shibukawa/myencrypt/internal/config"
+	"github.com/shibukawa/myencrypt/internal/logger"
+	"github.com/shibukawa/myencrypt/internal/management"
 )
 
 // TestServer represents a test server instance
@@ -51,11 +51,11 @@ func NewTestServer(t *testing.T, port int) *TestServer {
 
 	// Test configuration
 	cfg := &config.Config{
-		BindAddress:        "127.0.0.1",
-		HTTPPort:          port,
-		CertStorePath:     tmpDir,
-		IndividualCertTTL: 24 * time.Hour,
-		CACertTTL:         800 * 24 * time.Hour,
+		BindAddress:           "127.0.0.1",
+		HTTPPort:              port,
+		CertStorePath:         tmpDir,
+		IndividualCertTTL:     24 * time.Hour,
+		CACertTTL:             800 * 24 * time.Hour,
 		DefaultAllowedDomains: []string{"localhost", "*.localhost", "*.test"},
 	}
 
@@ -138,7 +138,7 @@ func (ts *TestServer) Start(t *testing.T) {
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
-	
+
 	t.Fatal("Server failed to start within timeout")
 }
 
@@ -147,7 +147,7 @@ func (ts *TestServer) Stop() {
 	// Shutdown HTTP server
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer shutdownCancel()
-	
+
 	if err := ts.Server.Shutdown(shutdownCtx); err != nil {
 		fmt.Printf("Server shutdown error: %v\n", err)
 	}
@@ -230,7 +230,7 @@ func (ts *TestServer) GetDatabaseStats() (map[string]int, error) {
 
 	stats := make(map[string]int)
 	tables := []string{"accounts", "orders", "certificates", "authorizations", "challenges", "nonces"}
-	
+
 	for _, table := range tables {
 		var count int
 		err := db.QueryRow(fmt.Sprintf("SELECT COUNT(*) FROM %s", table)).Scan(&count)
@@ -284,7 +284,7 @@ func (ac *ACMEClient) RegisterAccount(ctx context.Context) (*acme.Account, error
 	account := &acme.Account{
 		Contact: []string{"mailto:" + uniqueEmail},
 	}
-	
+
 	return ac.client.Register(ctx, account, acme.AcceptTOS)
 }
 
@@ -294,7 +294,7 @@ func (ac *ACMEClient) CreateOrder(ctx context.Context, domains []string) (*acme.
 	for _, domain := range domains {
 		authzIDs = append(authzIDs, acme.AuthzID{Type: "dns", Value: domain})
 	}
-	
+
 	return ac.client.AuthorizeOrder(ctx, authzIDs)
 }
 
@@ -335,7 +335,7 @@ func TestIntegration(t *testing.T) {
 
 		go func() {
 			defer close(clientDone)
-			
+
 			// Create ACME client
 			client, err := NewACMEClient(server.Config.HTTPPort)
 			if err != nil {
