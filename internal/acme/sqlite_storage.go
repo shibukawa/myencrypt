@@ -1,8 +1,10 @@
 package acme
 
 import (
+	"crypto/x509"
 	"database/sql"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -174,6 +176,34 @@ func (s *SQLiteStorage) runMigrations() error {
 		}
 	}
 
+	// Check if updated_at column exists in certificates table
+	var certUpdatedAtExists bool
+	err = s.db.QueryRow(`
+		SELECT COUNT(*) > 0 
+		FROM pragma_table_info('certificates') 
+		WHERE name = 'updated_at'
+	`).Scan(&certUpdatedAtExists)
+
+	if err != nil {
+		return fmt.Errorf("failed to check updated_at column in certificates: %w", err)
+	}
+
+	// Add updated_at column to certificates table if it doesn't exist
+	if !certUpdatedAtExists {
+		s.logger.Info("Adding updated_at column to certificates table")
+		// SQLite doesn't allow adding columns with non-constant defaults, so we add without default first
+		_, err = s.db.Exec(`ALTER TABLE certificates ADD COLUMN updated_at DATETIME`)
+		if err != nil {
+			return fmt.Errorf("failed to add updated_at column to certificates: %w", err)
+		}
+
+		// Update existing records to have updated_at = issued_at
+		_, err = s.db.Exec(`UPDATE certificates SET updated_at = issued_at WHERE updated_at IS NULL`)
+		if err != nil {
+			return fmt.Errorf("failed to update existing certificates with updated_at: %w", err)
+		}
+	}
+
 	return nil
 }
 
@@ -307,14 +337,67 @@ func (s *SQLiteStorage) DeleteOrder(orderID string) error {
 
 // Certificate operations
 func (s *SQLiteStorage) StoreCertificate(certID string, certChain []byte) error {
-	// This is a simplified implementation - in practice, you'd want to parse the certificate
-	// and extract more metadata
+	// Get order information to extract domains and account ID
+	var orderID, accountID string
+	var domainsJSON string
+
+	// First, try to get order information using certID as orderID
+	orderQuery := `SELECT id, account_id, domains FROM orders WHERE id = ?`
+	err := s.db.QueryRow(orderQuery, certID).Scan(&orderID, &accountID, &domainsJSON)
+
+	var finalDomainsJSON string = "[]"
+
+	if err == nil {
+		// Parse the domains from order format to simple string array
+		var orderDomains []struct {
+			Type  string `json:"type"`
+			Value string `json:"value"`
+		}
+
+		if err := json.Unmarshal([]byte(domainsJSON), &orderDomains); err == nil {
+			var domains []string
+			for _, domain := range orderDomains {
+				if domain.Type == "dns" {
+					domains = append(domains, domain.Value)
+				}
+			}
+			if len(domains) > 0 {
+				if domainsBytes, err := json.Marshal(domains); err == nil {
+					finalDomainsJSON = string(domainsBytes)
+				}
+			}
+		}
+	} else {
+		// If not found, use default values
+		orderID = certID
+		accountID = "unknown"
+	}
+
+	// Parse certificate to extract serial number and expiration
+	serialNumber := certID                   // Default to certID if parsing fails
+	expiresAt := "datetime('now', '+1 day')" // Default expiration
+
+	// Try to parse the certificate for more accurate information
+	if block, _ := pem.Decode(certChain); block != nil {
+		if cert, err := x509.ParseCertificate(block.Bytes); err == nil {
+			serialNumber = cert.SerialNumber.String()
+			expiresAt = "'" + cert.NotAfter.Format("2006-01-02 15:04:05") + "'"
+
+			// If we couldn't get domains from order, try to get from certificate
+			if finalDomainsJSON == "[]" && len(cert.DNSNames) > 0 {
+				if domainsBytes, err := json.Marshal(cert.DNSNames); err == nil {
+					finalDomainsJSON = string(domainsBytes)
+				}
+			}
+		}
+	}
+
 	query := `
-		INSERT OR REPLACE INTO certificates (id, order_id, account_id, serial_number, domains, certificate_pem, expires_at)
-		VALUES (?, 'unknown', 'unknown', ?, '[]', ?, datetime('now', '+1 day'))
+		INSERT OR REPLACE INTO certificates (id, order_id, account_id, serial_number, domains, certificate_pem, expires_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ` + expiresAt + `, CURRENT_TIMESTAMP)
 	`
 
-	_, err := s.db.Exec(query, certID, certID, string(certChain))
+	_, err = s.db.Exec(query, certID, orderID, accountID, serialNumber, finalDomainsJSON, string(certChain))
 	return err
 }
 

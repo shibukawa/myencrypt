@@ -26,7 +26,7 @@ certificatesResolvers:
       # Use MyEncrypt ACME server
       caServer: http://myencrypt:80/acme/directory
       email: admin@example.com
-      storage: /data/acme.json
+      storage: /tmp/acme.json  # Use temporary storage - no persistence needed
       # Use TLS-ALPN-01 challenge (more reliable for reverse proxies)
       tlsChallenge: {}
       # Enable key type for debugging

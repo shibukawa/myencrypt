@@ -78,20 +78,42 @@ func (cm *CertificateManager) GenerateCertificate(domain string) (*Certificate, 
 		return nil, fmt.Errorf("failed to generate serial number: %w", err)
 	}
 
+	// Extract CA creation time and project info
+	caCreatedAt := caCert.Certificate.NotBefore
+	projectName := os.Getenv("MYENCRYPT_PROJECT_NAME")
+
 	// Create certificate template
 	// Construct base URLs for CRL and OCSP
 	baseURL := fmt.Sprintf("http://localhost:%d", cm.config.HTTPPort)
 
+	// Build organization unit with CA information
+	var orgUnit []string
+	if projectName != "" {
+		orgUnit = []string{
+			"MyEncrypt Client Certificate",
+			fmt.Sprintf("Project: %s", projectName),
+			fmt.Sprintf("CA Created: %s", caCreatedAt.Format("2006-01-02 15:04:05 MST")),
+			fmt.Sprintf("Cert Issued: %s", time.Now().Format("2006-01-02 15:04:05 MST")),
+		}
+	} else {
+		orgUnit = []string{
+			"MyEncrypt Client Certificate",
+			fmt.Sprintf("CA Created: %s", caCreatedAt.Format("2006-01-02 15:04:05 MST")),
+			fmt.Sprintf("Cert Issued: %s", time.Now().Format("2006-01-02 15:04:05 MST")),
+		}
+	}
+
 	template := x509.Certificate{
 		SerialNumber: serialNumber,
 		Subject: pkix.Name{
-			Organization:  []string{"MyEncrypt Development"},
-			Country:       []string{"US"},
-			Province:      []string{""},
-			Locality:      []string{""},
-			StreetAddress: []string{""},
-			PostalCode:    []string{""},
-			CommonName:    domain,
+			Organization:       []string{"MyEncrypt Development"},
+			OrganizationalUnit: orgUnit,
+			Country:            []string{"US"},
+			Province:           []string{"Development"},
+			Locality:           []string{"Local"},
+			StreetAddress:      []string{""},
+			PostalCode:         []string{""},
+			CommonName:         domain,
 		},
 		NotBefore:          time.Now(),
 		NotAfter:           time.Now().Add(cm.caManager.config.IndividualCertTTL),
@@ -448,10 +470,44 @@ func (cm *CertificateManager) GenerateCertificateFromCSR(csr *x509.CertificateRe
 	// Construct base URLs for CRL and OCSP
 	baseURL := fmt.Sprintf("http://localhost:%d", cm.config.HTTPPort)
 
+	// Extract CA creation time and project info
+	caCreatedAt := caCert.Certificate.NotBefore
+	projectName := os.Getenv("MYENCRYPT_PROJECT_NAME")
+
+	// Build organization unit with CA information
+	var orgUnit []string
+	if projectName != "" {
+		orgUnit = []string{
+			"MyEncrypt Client Certificate",
+			fmt.Sprintf("Project: %s", projectName),
+			fmt.Sprintf("CA Created: %s", caCreatedAt.Format("2006-01-02 15:04:05 MST")),
+			fmt.Sprintf("Cert Issued: %s", time.Now().Format("2006-01-02 15:04:05 MST")),
+		}
+	} else {
+		orgUnit = []string{
+			"MyEncrypt Client Certificate",
+			fmt.Sprintf("CA Created: %s", caCreatedAt.Format("2006-01-02 15:04:05 MST")),
+			fmt.Sprintf("Cert Issued: %s", time.Now().Format("2006-01-02 15:04:05 MST")),
+		}
+	}
+
+	// Enhance the CSR subject with MyEncrypt information
+	enhancedSubject := csr.Subject
+	if len(enhancedSubject.Organization) == 0 {
+		enhancedSubject.Organization = []string{"MyEncrypt Development"}
+	}
+	enhancedSubject.OrganizationalUnit = orgUnit
+	if enhancedSubject.Province == nil || len(enhancedSubject.Province) == 0 {
+		enhancedSubject.Province = []string{"Development"}
+	}
+	if enhancedSubject.Locality == nil || len(enhancedSubject.Locality) == 0 {
+		enhancedSubject.Locality = []string{"Local"}
+	}
+
 	// Create certificate template based on CSR
 	template := x509.Certificate{
 		SerialNumber:       serialNumber,
-		Subject:            csr.Subject,
+		Subject:            enhancedSubject,
 		DNSNames:           csr.DNSNames,
 		NotBefore:          time.Now(),
 		NotAfter:           time.Now().Add(cm.caManager.config.IndividualCertTTL),

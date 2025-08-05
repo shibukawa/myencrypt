@@ -40,13 +40,13 @@ This directory contains demo applications showcasing different ways to use MyEnc
 
 ```bash
 # Start the complete demo environment
-docker-compose -f docker-compose.demo.yml up --build -d
+docker compose -f docker compose.demo.yml up --build -d
 
 # Check service status
-docker-compose -f docker-compose.demo.yml ps
+docker compose -f docker compose.demo.yml ps
 
 # View logs
-docker-compose -f docker-compose.demo.yml logs -f
+docker compose -f docker compose.demo.yml logs -f
 ```
 
 ### Add Hosts to /etc/hosts
@@ -115,7 +115,7 @@ PORT=8080
 
 To add custom domains:
 
-1. Update `MYENCRYPT_ALLOWED_DOMAINS` in docker-compose.demo.yml
+1. Update `MYENCRYPT_ALLOWED_DOMAINS` in docker compose.demo.yml
 2. Add domain configurations to Caddy/Traefik configs
 3. Add entries to your `/etc/hosts` file
 4. Restart the services
@@ -139,13 +139,13 @@ openssl s_client -connect app1-traefik.local:8444 -servername app1-traefik.local
 
 ```bash
 # Watch MyEncrypt logs
-docker-compose -f docker-compose.demo.yml logs -f myencrypt
+docker compose -f docker compose.demo.yml logs -f myencrypt
 
 # Watch Caddy logs
-docker-compose -f docker-compose.demo.yml logs -f caddy
+docker compose -f docker compose.demo.yml logs -f caddy
 
 # Watch Traefik logs
-docker-compose -f docker-compose.demo.yml logs -f traefik
+docker compose -f docker compose.demo.yml logs -f traefik
 ```
 
 ## 🛠️ Development
@@ -166,13 +166,13 @@ docker build -t myencrypt-simple-http-demo .
 
 ```bash
 # Run only MyEncrypt + Autocert
-docker-compose -f docker-compose.demo.yml up myencrypt autocert-app
+docker compose -f docker compose.demo.yml up myencrypt autocert-app
 
 # Run only MyEncrypt + Caddy + HTTP apps
-docker-compose -f docker-compose.demo.yml up myencrypt caddy simple-http-app1 simple-http-app2
+docker compose -f docker compose.demo.yml up myencrypt caddy simple-http-app1 simple-http-app2
 
 # Run only MyEncrypt + Traefik + HTTP apps
-docker-compose -f docker-compose.demo.yml up myencrypt traefik simple-http-app1-traefik simple-http-app2-traefik
+docker compose -f docker compose.demo.yml up myencrypt traefik simple-http-app1-traefik simple-http-app2-traefik
 ```
 
 ## 🔍 Troubleshooting
@@ -188,10 +188,10 @@ docker-compose -f docker-compose.demo.yml up myencrypt traefik simple-http-app1-
 
 ```bash
 # Check service health
-docker-compose -f docker-compose.demo.yml exec myencrypt wget -qO- http://localhost:14000/health
+docker compose -f docker compose.demo.yml exec myencrypt wget -qO- http://localhost:14000/health
 
 # Check certificate store
-docker-compose -f docker-compose.demo.yml exec myencrypt ls -la /data/
+docker compose -f docker compose.demo.yml exec myencrypt ls -la /data/
 
 # Test ACME directory
 curl http://localhost:14000/acme/directory
@@ -202,7 +202,7 @@ curl -k https://app1.local/health
 curl -k https://app1-traefik.local:8444/health
 
 # Check container mode detection
-docker-compose -f docker-compose.demo.yml exec myencrypt ./myencrypt run --dry-run
+docker compose -f docker compose.demo.yml exec myencrypt ./myencrypt run --dry-run
 ```
 
 ## 📚 Learn More

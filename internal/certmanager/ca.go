@@ -202,29 +202,44 @@ func (ca *CAManager) generateCACertificate() (*CACertificate, error) {
 
 	// Get project name for Docker mode
 	projectName := os.Getenv("MYENCRYPT_PROJECT_NAME")
+
+	// Get current time for CA creation timestamp
+	caCreatedAt := time.Now()
+
 	var caName string
+	var orgUnit []string
 	if projectName != "" {
 		// Docker mode: include project name
 		caName = fmt.Sprintf("MyEncrypt Development CA (%s)", projectName)
+		orgUnit = []string{
+			"MyEncrypt Local ACME CA",
+			fmt.Sprintf("Project: %s", projectName),
+			fmt.Sprintf("Created: %s", caCreatedAt.Format("2006-01-02 15:04:05 MST")),
+		}
 	} else {
 		// Service mode: use default name
 		caName = "MyEncrypt Development CA"
+		orgUnit = []string{
+			"MyEncrypt Local ACME CA",
+			fmt.Sprintf("Created: %s", caCreatedAt.Format("2006-01-02 15:04:05 MST")),
+		}
 	}
 
 	// Create certificate template
 	template := x509.Certificate{
 		SerialNumber: big.NewInt(1),
 		Subject: pkix.Name{
-			Organization:  []string{caName},
-			Country:       []string{"US"},
-			Province:      []string{""},
-			Locality:      []string{""},
-			StreetAddress: []string{""},
-			PostalCode:    []string{""},
-			CommonName:    caName,
+			Organization:       []string{caName},
+			OrganizationalUnit: orgUnit,
+			Country:            []string{"US"},
+			Province:           []string{"Development"},
+			Locality:           []string{"Local"},
+			StreetAddress:      []string{""},
+			PostalCode:         []string{""},
+			CommonName:         caName,
 		},
-		NotBefore:             time.Now(),
-		NotAfter:              time.Now().Add(ca.config.CACertTTL),
+		NotBefore:             caCreatedAt,
+		NotAfter:              caCreatedAt.Add(ca.config.CACertTTL),
 		KeyUsage:              x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
 		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
 		BasicConstraintsValid: true,

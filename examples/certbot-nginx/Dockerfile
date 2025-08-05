@@ -21,6 +21,8 @@ COPY <<EOF /var/www/html/index.html
 <html>
 <head>
     <title>Nginx with MyEncrypt Demo</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
     <style>
         body { 
             font-family: Arial, sans-serif; 
@@ -57,6 +59,7 @@ COPY <<EOF /var/www/html/index.html
         <div class="status">
             <h2>✅ HTTPS Connection Successful!</h2>
             <p>This page is served over HTTPS using a certificate from MyEncrypt ACME server.</p>
+            <p>日本語テスト: このページは正しく表示されるはずです。</p>
         </div>
         
         <div class="info">
@@ -65,8 +68,9 @@ COPY <<EOF /var/www/html/index.html
                 <li><strong>Web Server:</strong> Nginx</li>
                 <li><strong>ACME Client:</strong> Certbot</li>
                 <li><strong>Certificate Authority:</strong> MyEncrypt (Local ACME CA)</li>
-                <li><strong>Domain:</strong> nginx.localhost</li>
+                <li><strong>Domain:</strong> app-certbot.localhost</li>
                 <li><strong>Challenge Type:</strong> HTTP-01 (webroot)</li>
+                <li><strong>文字エンコーディング:</strong> UTF-8</li>
             </ul>
         </div>
         
@@ -76,7 +80,7 @@ COPY <<EOF /var/www/html/index.html
                 <li><a href="/health">Health Check</a></li>
                 <li><a href="/api/">API Proxy Test</a></li>
                 <li><a href="https://traefik.localhost:8444/">Traefik Dashboard</a></li>
-                <li><a href="https://app.localhost:8445/">Caddy Example</a></li>
+                <li><a href="https://autocert.localhost:8447/">Autocert Example</a></li>
             </ul>
         </div>
         
@@ -88,6 +92,7 @@ COPY <<EOF /var/www/html/index.html
                 <li>Security headers (HSTS, CSP, etc.)</li>
                 <li>Rate limiting</li>
                 <li>Gzip compression</li>
+                <li>UTF-8 character encoding</li>
             </ul>
         </div>
         

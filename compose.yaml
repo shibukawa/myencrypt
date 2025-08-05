@@ -14,7 +14,7 @@ services:
       - MYENCRYPT_DATABASE_PATH=/data/myencrypt.db
       - MYENCRYPT_LOG_LEVEL=debug  # Enable debug logging
     volumes:
-      - myencrypt_data:/data
+      - myencrypt_data:/data  # Only MyEncrypt data needs persistence
     restart: unless-stopped
 
   # Demo App 1: Autocert (direct HTTPS)
@@ -28,12 +28,11 @@ services:
       - DOMAIN=autocert.localhost
       - PORT=443    # Use standard HTTPS port for TLS-ALPN challenge
       - ACME_DIRECTORY_URL=http://myencrypt:80/acme/directory
-      - CACHE_DIR=/tmp/autocert-cache
+      - CACHE_DIR=/tmp/autocert-cache  # Use temporary directory, no persistence needed
     depends_on:
       - myencrypt
     restart: unless-stopped
-    volumes:
-      - autocert_cache:/tmp/autocert-cache
+    # No volumes - certificates will be fetched fresh each time
 
   # Shared Simple HTTP App (used by both Caddy and Traefik)
   simple-http-app:
@@ -64,7 +63,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - ./examples/traefik/traefik.yml:/etc/traefik/traefik.yml:ro
       - ./examples/traefik/dynamic.yml:/etc/traefik/dynamic.yml:ro
-      - traefik_data:/data
+      # No data volume - certificates will be fetched fresh each time
     depends_on:
       - myencrypt
       - simple-http-app
@@ -90,10 +89,7 @@ services:
     ports:
       - "8085:80"    # HTTP (different port to avoid conflicts)
       - "8446:443"   # HTTPS (different port to avoid conflicts)
-    volumes:
-      - certbot_data:/etc/letsencrypt
-      - certbot_www:/var/www/certbot
-      - nginx_logs:/var/log/nginx
+    # No volumes - certificates and logs will be fresh each time
     depends_on:
       - myencrypt
       - simple-http-app
@@ -103,12 +99,7 @@ services:
       - "traefik.enable=false"  # Disable Traefik for this service
 
 volumes:
-  myencrypt_data:
-  autocert_cache:
-  traefik_data:
-  certbot_data:
-  certbot_www:
-  nginx_logs:
+  myencrypt_data:  # Only MyEncrypt CA and database need persistence
 
 networks:
   default:

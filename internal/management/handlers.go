@@ -137,6 +137,13 @@ func (s *Server) serveManagementInterface(w http.ResponseWriter, r *http.Request
 		stats = &Statistics{} // Use empty stats on error
 	}
 
+	// Get CA information
+	caInfo, err := s.getCAInfo()
+	if err != nil {
+		s.logger.Error("Failed to get CA info", "error", err)
+		caInfo = &CAInfo{} // Use empty CA info on error
+	}
+
 	// Get accounts
 	accounts, err := s.getAllAccounts()
 	if err != nil {
@@ -186,7 +193,8 @@ func (s *Server) serveManagementInterface(w http.ResponseWriter, r *http.Request
         .btn-danger:hover { background: #c82333; }
         .btn-secondary { background: #6c757d; color: white; }
         .btn-secondary:hover { background: #5a6268; }
-        .domains { font-size: 12px; color: #666; }
+        .domains { font-size: 12px; color: #666; line-height: 1.4; max-width: 200px; }
+        .domains small { color: #999; font-style: italic; }
         .account-id { font-family: monospace; font-size: 12px; }
     </style>
 </head>
@@ -223,6 +231,11 @@ func (s *Server) serveManagementInterface(w http.ResponseWriter, r *http.Request
         </div>
         
         <div class="section">
+            <h2>🔐 Certificate Authority Information</h2>
+            %s
+        </div>
+        
+        <div class="section">
             <h2>👤 ACME Accounts</h2>
             %s
         </div>
@@ -238,6 +251,7 @@ func (s *Server) serveManagementInterface(w http.ResponseWriter, r *http.Request
 		stats.ValidCertificates,
 		stats.ExpiredCertificates,
 		stats.RevokedCertificates,
+		s.renderCAInfo(caInfo),
 		s.renderAccountsTable(accounts),
 		s.renderCertificatesTable(certificates))
 
@@ -1263,12 +1277,25 @@ catch {
 }
 
 // Helper types for management interface
+type CAInfo struct {
+	Subject      string    `json:"subject"`
+	Issuer       string    `json:"issuer"`
+	SerialNumber string    `json:"serial_number"`
+	NotBefore    time.Time `json:"not_before"`
+	NotAfter     time.Time `json:"not_after"`
+	Organization []string  `json:"organization"`
+	OrgUnit      []string  `json:"organizational_unit"`
+	CommonName   string    `json:"common_name"`
+	ProjectName  string    `json:"project_name"`
+}
+
 type AccountInfo struct {
 	ID        string    `json:"id"`
 	Contact   []string  `json:"contact"`
 	Status    string    `json:"status"`
 	CreatedAt time.Time `json:"created_at"`
 	CertCount int       `json:"cert_count"`
+	Domains   []string  `json:"domains"`
 }
 
 type CertificateInfo struct {
@@ -1378,10 +1405,57 @@ func (s *Server) getAllAccounts() ([]*AccountInfo, error) {
 			json.Unmarshal([]byte(contactJSON), &account.Contact)
 		}
 
+		// Get domains for this account
+		domains, err := s.getAccountDomains(db, account.ID)
+		if err == nil {
+			account.Domains = domains
+		}
+
 		accounts = append(accounts, &account)
 	}
 
 	return accounts, nil
+}
+
+// Helper function to get domains for a specific account
+func (s *Server) getAccountDomains(db *sql.DB, accountID string) ([]string, error) {
+	query := `
+		SELECT DISTINCT domains 
+		FROM certificates 
+		WHERE account_id = ? AND status = 'valid'
+		ORDER BY issued_at DESC
+	`
+
+	rows, err := db.Query(query, accountID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	domainSet := make(map[string]bool)
+	for rows.Next() {
+		var domainsJSON string
+		if err := rows.Scan(&domainsJSON); err != nil {
+			continue
+		}
+
+		var domains []string
+		if err := json.Unmarshal([]byte(domainsJSON), &domains); err != nil {
+			continue
+		}
+
+		for _, domain := range domains {
+			domainSet[domain] = true
+		}
+	}
+
+	// Convert map to slice
+	var uniqueDomains []string
+	for domain := range domainSet {
+		uniqueDomains = append(uniqueDomains, domain)
+	}
+
+	return uniqueDomains, nil
 }
 
 func (s *Server) getAllCertificates() ([]*CertificateInfo, error) {
@@ -1479,6 +1553,7 @@ func (s *Server) renderAccountsTable(accounts []*AccountInfo) string {
 			<tr>
 				<th>Account ID</th>
 				<th>Contact</th>
+				<th>Domains</th>
 				<th>Status</th>
 				<th>Created</th>
 				<th>Certificates</th>
@@ -1498,10 +1573,24 @@ func (s *Server) renderAccountsTable(accounts []*AccountInfo) string {
 			contact = account.Contact[0]
 		}
 
+		// Format domains list
+		domains := ""
+		if len(account.Domains) > 0 {
+			if len(account.Domains) <= 3 {
+				domains = strings.Join(account.Domains, "<br>")
+			} else {
+				domains = strings.Join(account.Domains[:3], "<br>") +
+					fmt.Sprintf("<br><small>+%d more</small>", len(account.Domains)-3)
+			}
+		} else {
+			domains = "<small>No domains</small>"
+		}
+
 		html += fmt.Sprintf(`
 			<tr>
 				<td><span class="account-id">%s</span></td>
 				<td>%s</td>
+				<td><span class="domains">%s</span></td>
 				<td><span class="status-badge %s">%s</span></td>
 				<td>%s</td>
 				<td>%d</td>
@@ -1514,6 +1603,7 @@ func (s *Server) renderAccountsTable(accounts []*AccountInfo) string {
 			</tr>`,
 			account.ID[:8]+"...",
 			contact,
+			domains,
 			statusClass,
 			strings.Title(account.Status),
 			account.CreatedAt.Format("2006-01-02 15:04"),
@@ -1568,6 +1658,17 @@ func (s *Server) renderCertificatesTable(certificates []*CertificateInfo) string
 			contact = cert.AccountContact[0]
 		}
 
+		// Safely truncate serial number and account ID
+		serialDisplay := cert.SerialNumber
+		if len(serialDisplay) > 8 {
+			serialDisplay = serialDisplay[:8] + "..."
+		}
+
+		accountDisplay := cert.AccountID
+		if len(accountDisplay) > 8 {
+			accountDisplay = accountDisplay[:8] + "..."
+		}
+
 		html += fmt.Sprintf(`
 			<tr>
 				<td><span class="account-id">%s</span></td>
@@ -1583,9 +1684,9 @@ func (s *Server) renderCertificatesTable(certificates []*CertificateInfo) string
 					</form>
 				</td>
 			</tr>`,
-			cert.SerialNumber[:8]+"...",
+			serialDisplay,
 			domains,
-			cert.AccountID[:8]+"...",
+			accountDisplay,
 			contact,
 			statusClass,
 			strings.Title(cert.Status),
@@ -1596,4 +1697,140 @@ func (s *Server) renderCertificatesTable(certificates []*CertificateInfo) string
 
 	html += `</tbody></table>`
 	return html
+}
+
+// renderCAInfo renders the CA information section
+func (s *Server) renderCAInfo(caInfo *CAInfo) string {
+	if caInfo == nil || caInfo.CommonName == "" {
+		return `<div class="empty-state">
+			<p>CA information not available.</p>
+			<p><small>CA certificate information could not be retrieved.</small></p>
+		</div>`
+	}
+
+	// Format organizational units
+	orgUnits := ""
+	if len(caInfo.OrgUnit) > 0 {
+		orgUnits = "<ul>"
+		for _, unit := range caInfo.OrgUnit {
+			orgUnits += fmt.Sprintf("<li>%s</li>", unit)
+		}
+		orgUnits += "</ul>"
+	} else {
+		orgUnits = "<small>No organizational units</small>"
+	}
+
+	// Format organization
+	organization := ""
+	if len(caInfo.Organization) > 0 {
+		organization = strings.Join(caInfo.Organization, ", ")
+	} else {
+		organization = "MyEncrypt Development"
+	}
+
+	html := fmt.Sprintf(`
+		<div class="ca-info">
+			<div class="ca-details">
+				<h3>🏢 Certificate Authority Details</h3>
+				<table class="ca-table">
+					<tr>
+						<td><strong>Common Name:</strong></td>
+						<td>%s</td>
+					</tr>
+					<tr>
+						<td><strong>Organization:</strong></td>
+						<td>%s</td>
+					</tr>
+					<tr>
+						<td><strong>Project:</strong></td>
+						<td>%s</td>
+					</tr>
+					<tr>
+						<td><strong>Serial Number:</strong></td>
+						<td><code>%s</code></td>
+					</tr>
+					<tr>
+						<td><strong>Valid From:</strong></td>
+						<td>%s</td>
+					</tr>
+					<tr>
+						<td><strong>Valid Until:</strong></td>
+						<td>%s</td>
+					</tr>
+				</table>
+			</div>
+			<div class="ca-org-units">
+				<h3>📋 Certificate Details</h3>
+				%s
+			</div>
+		</div>
+		<style>
+			.ca-info { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+			.ca-table { width: 100%%; border-collapse: collapse; }
+			.ca-table td { padding: 8px; border-bottom: 1px solid #eee; }
+			.ca-table td:first-child { width: 30%%; font-weight: bold; }
+			.ca-table code { background: #f5f5f5; padding: 2px 4px; border-radius: 3px; font-size: 12px; }
+			@media (max-width: 768px) {
+				.ca-info { grid-template-columns: 1fr; }
+			}
+		</style>`,
+		caInfo.CommonName,
+		organization,
+		caInfo.ProjectName,
+		caInfo.SerialNumber,
+		caInfo.NotBefore.Format("2006-01-02 15:04:05 MST"),
+		caInfo.NotAfter.Format("2006-01-02 15:04:05 MST"),
+		orgUnits)
+
+	return html
+}
+
+// getCAInfo retrieves CA certificate information
+func (s *Server) getCAInfo() (*CAInfo, error) {
+	// Get CA certificate from the certificate manager
+	caInfo, err := s.certManager.GetCAInfo()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get CA info: %w", err)
+	}
+
+	// Extract project name from environment
+	projectName := os.Getenv("MYENCRYPT_PROJECT_NAME")
+	if projectName == "" {
+		projectName = "default"
+	}
+
+	// Convert to our CAInfo structure
+	info := &CAInfo{
+		Subject:      caInfo["subject"].(string),
+		Issuer:       caInfo["issuer"].(string),
+		SerialNumber: caInfo["serial_number"].(string),
+		NotBefore:    caInfo["not_before"].(time.Time),
+		NotAfter:     caInfo["not_after"].(time.Time),
+		CommonName:   caInfo["subject"].(string), // Extract from subject if needed
+		ProjectName:  projectName,
+	}
+
+	// Try to extract organization and organizational unit if available
+	if subject, ok := caInfo["subject"].(string); ok {
+		// Parse subject string to extract organization info
+		// This is a simplified parser - in production you might want more robust parsing
+		if strings.Contains(subject, "O=") {
+			// Extract organization
+			parts := strings.Split(subject, ",")
+			for _, part := range parts {
+				part = strings.TrimSpace(part)
+				if strings.HasPrefix(part, "O=") {
+					info.Organization = []string{strings.TrimPrefix(part, "O=")}
+				}
+				if strings.HasPrefix(part, "OU=") {
+					info.OrgUnit = append(info.OrgUnit, strings.TrimPrefix(part, "OU="))
+				}
+				if strings.HasPrefix(part, "CN=") {
+					info.CommonName = strings.TrimPrefix(part, "CN=")
+				}
+			}
+		}
+	}
+
+	return info, nil
 }
