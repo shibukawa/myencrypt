@@ -69,25 +69,6 @@ jobs:
     - name: Download dependencies
       run: go mod download
       
-    - name: Build binary
-      env:
-        GOOS: ${{ matrix.goos }}
-        GOARCH: ${{ matrix.goarch }}
-        CGO_ENABLED: 0
-      run: |
-        go build -ldflags="-s -w -X main.version=${{ github.ref_name }} -X main.commit=${{ github.sha }} -X main.date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-          -o "dist/${BINARY_NAME}" .
-        
-        # Create compressed archive
-        cd dist
-        if [[ "${{ matrix.goos }}" == "windows" ]]; then
-          zip "${BINARY_NAME%.exe}.zip" "${BINARY_NAME}"
-          echo "Created ${BINARY_NAME%.exe}.zip"
-        else
-          tar -czf "${BINARY_NAME}.tar.gz" "${BINARY_NAME}"
-          echo "Created ${BINARY_NAME}.tar.gz"
-        fi
-        ls -la
     - name: Build (Linux/macOS)
       if: runner.os != 'Windows'
       env:
