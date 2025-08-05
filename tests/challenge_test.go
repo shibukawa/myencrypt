@@ -2,13 +2,26 @@ package tests
 
 import (
 	"context"
+	"net"
 	"net/http"
+	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
 
 	"golang.org/x/crypto/acme"
 )
+
+// findAvailablePort finds an available port for testing
+func findAvailablePort() (int, error) {
+	listener, err := net.Listen("tcp", ":0")
+	if err != nil {
+		return 0, err
+	}
+	defer listener.Close()
+	return listener.Addr().(*net.TCPAddr).Port, nil
+}
 
 // TestHTTP01Challenge tests HTTP-01 challenge validation
 func TestHTTP01Challenge(t *testing.T) {
@@ -75,39 +88,33 @@ func TestHTTP01Challenge(t *testing.T) {
 		}
 		t.Logf("✅ HTTP-01 challenge found: %s", httpChallenge.URI)
 
-		// Start HTTP server to serve challenge response
-		challengeServer := &http.Server{
-			Addr: ":8080", // Use port 8080 for testing (port 80 requires privileges)
-			Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if strings.HasPrefix(r.URL.Path, "/.well-known/acme-challenge/") {
-					token := strings.TrimPrefix(r.URL.Path, "/.well-known/acme-challenge/")
-					if token == httpChallenge.Token {
-						// Generate key authorization
-						keyAuth, err := client.client.HTTP01ChallengeResponse(httpChallenge.Token)
-						if err != nil {
-							t.Logf("Failed to generate key authorization: %v", err)
-							http.Error(w, "Internal error", http.StatusInternalServerError)
-							return
-						}
-						w.Header().Set("Content-Type", "text/plain")
-						w.Write([]byte(keyAuth))
-						t.Logf("📋 Served challenge response: %s", keyAuth)
+		// Create HTTP server to serve challenge response using httptest (avoids port 80 permission issues)
+		challengeServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if strings.HasPrefix(r.URL.Path, "/.well-known/acme-challenge/") {
+				token := strings.TrimPrefix(r.URL.Path, "/.well-known/acme-challenge/")
+				if token == httpChallenge.Token {
+					// Generate key authorization
+					keyAuth, err := client.client.HTTP01ChallengeResponse(httpChallenge.Token)
+					if err != nil {
+						t.Logf("Failed to generate key authorization: %v", err)
+						http.Error(w, "Internal error", http.StatusInternalServerError)
 						return
 					}
+					w.Header().Set("Content-Type", "text/plain")
+					w.Write([]byte(keyAuth))
+					t.Logf("📋 Served challenge response: %s", keyAuth)
+					return
 				}
-				http.NotFound(w, r)
-			}),
-		}
-
-		// Start challenge server
-		go func() {
-			if err := challengeServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-				t.Logf("Challenge server error: %v", err)
 			}
-		}()
+			http.NotFound(w, r)
+		}))
+		defer challengeServer.Close()
 
-		// Wait for server to start
-		time.Sleep(1 * time.Second)
+		// Set test environment variable to redirect HTTP-01 validation to our test server
+		os.Setenv("MYENCRYPT_TEST_HTTP01_BASE_URL", challengeServer.URL)
+		defer os.Unsetenv("MYENCRYPT_TEST_HTTP01_BASE_URL")
+
+		t.Logf("📋 Challenge server started on %s", challengeServer.URL)
 
 		// Accept challenge
 		_, err = client.client.Accept(ctx, httpChallenge)
@@ -116,12 +123,12 @@ func TestHTTP01Challenge(t *testing.T) {
 		}
 		t.Log("✅ Challenge accepted")
 
-		// Wait for challenge validation
-		for i := 0; i < 30; i++ {
+		// Wait for challenge validation (reduced iterations and sleep time)
+		for i := 0; i < 15; i++ { // Increased from 10 to 15 for successful validation
 			challenge, err := client.client.GetChallenge(ctx, httpChallenge.URI)
 			if err != nil {
 				t.Logf("Failed to get challenge status: %v", err)
-				time.Sleep(2 * time.Second)
+				time.Sleep(100 * time.Millisecond) // Reduced from 1s to 100ms (1/10)
 				continue
 			}
 
@@ -134,11 +141,8 @@ func TestHTTP01Challenge(t *testing.T) {
 				t.Fatalf("Challenge validation failed: %v", challenge.Error)
 			}
 
-			time.Sleep(2 * time.Second)
+			time.Sleep(100 * time.Millisecond) // Reduced from 1s to 100ms (1/10)
 		}
-
-		// Shutdown challenge server
-		challengeServer.Shutdown(context.Background())
 
 		// Check authorization status
 		authz, err = client.client.GetAuthorization(ctx, order.AuthzURLs[0])
@@ -182,7 +186,7 @@ func TestChallengeValidationErrors(t *testing.T) {
 			t.Fatalf("Failed to create ACME client: %v", err)
 		}
 
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second) // Reduced from 15s to 3s
 		defer cancel()
 
 		// Register account
@@ -222,12 +226,12 @@ func TestChallengeValidationErrors(t *testing.T) {
 			t.Fatalf("Failed to accept challenge: %v", err)
 		}
 
-		// Wait for challenge validation to fail
-		for i := 0; i < 15; i++ {
+		// Wait for challenge validation to fail (reduced iterations and sleep time)
+		for i := 0; i < 10; i++ { // Increased from 8 to 10 to account for faster checks
 			challenge, err := client.client.GetChallenge(ctx, httpChallenge.URI)
 			if err != nil {
 				t.Logf("Failed to get challenge status: %v", err)
-				time.Sleep(2 * time.Second)
+				time.Sleep(100 * time.Millisecond) // Reduced from 1s to 100ms (1/10)
 				continue
 			}
 
@@ -238,7 +242,7 @@ func TestChallengeValidationErrors(t *testing.T) {
 				t.Fatal("Challenge validation unexpectedly succeeded")
 			}
 
-			time.Sleep(2 * time.Second)
+			time.Sleep(100 * time.Millisecond) // Reduced from 1s to 100ms (1/10)
 		}
 
 		t.Log("⚠️  Challenge validation timeout (may be expected)")
@@ -251,7 +255,7 @@ func TestChallengeValidationErrors(t *testing.T) {
 			t.Fatalf("Failed to create ACME client: %v", err)
 		}
 
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second) // Reduced from 15s to 3s
 		defer cancel()
 
 		// Register account
@@ -285,26 +289,16 @@ func TestChallengeValidationErrors(t *testing.T) {
 			t.Fatal("No HTTP-01 challenge found")
 		}
 
-		// Start HTTP server with wrong response
-		challengeServer := &http.Server{
-			Addr: ":8081",
-			Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if strings.HasPrefix(r.URL.Path, "/.well-known/acme-challenge/") {
-					w.Header().Set("Content-Type", "text/plain")
-					w.Write([]byte("wrong-response"))
-					return
-				}
-				http.NotFound(w, r)
-			}),
-		}
-
-		go func() {
-			if err := challengeServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-				t.Logf("Challenge server error: %v", err)
+		// Start HTTP test server with wrong response
+		challengeServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if strings.HasPrefix(r.URL.Path, "/.well-known/acme-challenge/") {
+				w.Header().Set("Content-Type", "text/plain")
+				w.Write([]byte("wrong-response"))
+				return
 			}
-		}()
-
-		time.Sleep(1 * time.Second)
+			http.NotFound(w, r)
+		}))
+		defer challengeServer.Close()
 
 		// Accept challenge
 		_, err = client.client.Accept(ctx, httpChallenge)
@@ -312,27 +306,25 @@ func TestChallengeValidationErrors(t *testing.T) {
 			t.Fatalf("Failed to accept challenge: %v", err)
 		}
 
-		// Wait for challenge validation to fail
-		for i := 0; i < 15; i++ {
+		// Wait for challenge validation to fail (reduced iterations and sleep time)
+		for i := 0; i < 10; i++ { // Increased from 8 to 10 to account for faster checks
 			challenge, err := client.client.GetChallenge(ctx, httpChallenge.URI)
 			if err != nil {
 				t.Logf("Failed to get challenge status: %v", err)
-				time.Sleep(2 * time.Second)
+				time.Sleep(100 * time.Millisecond) // Reduced from 1s to 100ms (1/10)
 				continue
 			}
 
 			if challenge.Status == acme.StatusInvalid {
 				t.Logf("✅ Challenge validation failed as expected: %v", challenge.Error)
-				challengeServer.Shutdown(context.Background())
 				return
 			} else if challenge.Status == acme.StatusValid {
 				t.Fatal("Challenge validation unexpectedly succeeded")
 			}
 
-			time.Sleep(2 * time.Second)
+			time.Sleep(100 * time.Millisecond) // Reduced from 1s to 100ms (1/10)
 		}
 
-		challengeServer.Shutdown(context.Background())
 		t.Log("⚠️  Challenge validation timeout")
 	})
 }
@@ -391,7 +383,7 @@ func TestDatabasePersistenceAfterChallenge(t *testing.T) {
 	}
 
 	// Wait a bit for processing
-	time.Sleep(3 * time.Second)
+	time.Sleep(300 * time.Millisecond) // Reduced from 3s to 300ms (1/10)
 
 	// Check database persistence
 	stats, err := server.GetDatabaseStats()

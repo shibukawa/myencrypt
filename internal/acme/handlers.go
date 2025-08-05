@@ -879,14 +879,14 @@ func (s *Server) handlePostChallenge(w http.ResponseWriter, r *http.Request, cha
 		return
 	}
 	
-	// If challenge is already valid or invalid, return current status
-	if challenge.Status == StatusValid || challenge.Status == StatusInvalid {
+	// If challenge is already valid, invalid, or processing, return current status
+	if challenge.Status == StatusValid || challenge.Status == StatusInvalid || challenge.Status == StatusProcessing {
 		s.handleGetChallenge(w, r, challenge)
 		return
 	}
 	
 	// Start challenge validation
-	s.logger.Info("Starting challenge validation", "challenge_id", challenge.ID, "type", challenge.Type)
+	s.logger.Debug("Challenge POST received", "challenge_id", challenge.ID, "type", challenge.Type)
 	
 	// Don't update challenge status to processing immediately
 	// Keep it as pending until validation completes

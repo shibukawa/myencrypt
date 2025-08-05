@@ -65,7 +65,7 @@ prod-stop: ## Stop production environment
 
 run: ## Run the application locally
 	@echo "$(YELLOW)🚀 Starting MyEncrypt server...$(NC)"
-	go run cmd/myencrypt/main.go run
+	go run ./cmd/myencrypt run
 
 run-docker: ## Run with Docker
 	@echo "$(YELLOW)🐳 Starting MyEncrypt with Docker...$(NC)"
@@ -73,7 +73,7 @@ run-docker: ## Run with Docker
 
 run-env: ## Run with container mode (environment variables only)
 	@echo "$(YELLOW)🐳 Starting MyEncrypt in container mode...$(NC)"
-	go run cmd/myencrypt/main.go run --container
+	go run ./cmd/myencrypt run --container
 
 test: ## Run tests
 	@echo "$(YELLOW)🧪 Running tests...$(NC)"
@@ -140,13 +140,13 @@ build-all: ## Build binaries for all platforms
 			echo "Building $$os/$$arch..."; \
 			GOOS=$$os GOARCH=$$arch CGO_ENABLED=0 go build \
 				-ldflags="-w -s -X main.version=dev -X main.commit=$$(git rev-parse --short HEAD) -X main.date=$$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-				-o dist/myencrypt-$$os-$$arch$$ext cmd/myencrypt/main.go; \
+				-o dist/myencrypt-$$os-$$arch$$ext ./cmd/myencrypt; \
 		done; \
 	done
 	@echo "$(GREEN)✅ All binaries built in dist/ directory!$(NC)"
 
 version: ## Show version information
-	@go run -ldflags="-X main.version=dev -X main.commit=$$(git rev-parse --short HEAD) -X main.date=$$(date -u +%Y-%m-%dT%H:%M:%SZ)" cmd/myencrypt/main.go version
+	@go run -ldflags="-X main.version=dev -X main.commit=$$(git rev-parse --short HEAD) -X main.date=$$(date -u +%Y-%m-%dT%H:%M:%SZ)" ./cmd/myencrypt version
 
 lint: ## Run linter
 	@echo "$(YELLOW)🔍 Running linter...$(NC)"

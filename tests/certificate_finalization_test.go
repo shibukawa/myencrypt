@@ -86,7 +86,7 @@ func TestCertificateFinalization(t *testing.T) {
 		t.Log("✅ Challenge accepted")
 
 		// Wait for challenge to be processed
-		time.Sleep(3 * time.Second)
+		time.Sleep(300 * time.Millisecond) // Reduced from 3s to 300ms (1/10)
 
 		// Check challenge status
 		challenge, err := client.client.GetChallenge(ctx, httpChallenge.URI)
@@ -158,7 +158,7 @@ func TestCertificateFinalization(t *testing.T) {
 				t.Fatalf("Order became invalid: %v", order.Error)
 			}
 
-			time.Sleep(2 * time.Second)
+			time.Sleep(200 * time.Millisecond) // Reduced from 2s to 200ms (1/10)
 		}
 
 		// Use certificate from finalization

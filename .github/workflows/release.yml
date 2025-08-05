@@ -1,295 +1,74 @@
-name: Release
+name: Go Release
 
 on:
   push:
     tags:
-      - 'v*'
-  workflow_dispatch:
-    inputs:
-      tag:
-        description: 'Tag to release'
-        required: true
-        default: 'v0.1.0'
-
-env:
-  REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
+      - 'v*.*.*'
 
 jobs:
-  # Build binaries for multiple platforms
-  build-binaries:
-    name: Build Binaries
+  build_and_release:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        include:
-          # Linux
-          - goos: linux
-            goarch: amd64
-            suffix: ""
-          - goos: linux
-            goarch: arm64
-            suffix: ""
-          # macOS
-          - goos: darwin
-            goarch: arm64
-            suffix: ""
-          # Windows
-          - goos: windows
-            goarch: amd64
-            suffix: ".exe"
-          - goos: windows
-            goarch: arm64
-            suffix: ".exe"
-    
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-
-    - name: Set up Go
-      uses: actions/setup-go@v4
-      with:
-        go-version: '1.24'
-        cache: true
-
-    - name: Install dependencies
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y gcc-aarch64-linux-gnu gcc-mingw-w64
-        go mod download
-
-    - name: Build binary
-      env:
-        GOOS: ${{ matrix.goos }}
-        GOARCH: ${{ matrix.goarch }}
-        CGO_ENABLED: 1
-      run: |
-        # Set cross-compilation environment
-        case "${{ matrix.goos }}-${{ matrix.goarch }}" in
-          linux-arm64)
-            export CC=aarch64-linux-gnu-gcc
-            ;;
-          windows-amd64)
-            export CC=x86_64-w64-mingw32-gcc
-            ;;
-          windows-arm64)
-            export CC=aarch64-w64-mingw32-gcc
-            ;;
-          darwin-arm64)
-            export CGO_ENABLED=0  # Disable CGO for macOS cross-compilation
-            ;;
-        esac
-        
-        # Build binary
-        OUTPUT_NAME="myencrypt-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.suffix }}"
-        go build -ldflags="-w -s -X main.version=${GITHUB_REF#refs/tags/} -X main.commit=${GITHUB_SHA::8} -X main.date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" -o "${OUTPUT_NAME}" cmd/myencrypt/main.go
-        
-        # Create archive
-        if [ "${{ matrix.goos }}" = "windows" ]; then
-          zip "${OUTPUT_NAME%.exe}.zip" "${OUTPUT_NAME}"
-          echo "ASSET_NAME=${OUTPUT_NAME%.exe}.zip" >> $GITHUB_ENV
-        else
-          tar -czf "${OUTPUT_NAME}.tar.gz" "${OUTPUT_NAME}"
-          echo "ASSET_NAME=${OUTPUT_NAME}.tar.gz" >> $GITHUB_ENV
-        fi
-        
-        echo "BINARY_NAME=${OUTPUT_NAME}" >> $GITHUB_ENV
-
-    - name: Upload binary artifact
-      uses: actions/upload-artifact@v3
-      with:
-        name: binaries
-        path: ${{ env.ASSET_NAME }}
-
-  # Build and push Docker images
-  build-docker:
-    name: Build Docker Images
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-    
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-
-    - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v3
-
-    - name: Log in to Container Registry
-      uses: docker/login-action@v3
-      with:
-        registry: ${{ env.REGISTRY }}
-        username: ${{ github.actor }}
-        password: ${{ secrets.GITHUB_TOKEN }}
-
-    - name: Extract metadata
-      id: meta
-      uses: docker/metadata-action@v5
-      with:
-        images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-        tags: |
-          type=ref,event=tag
-          type=ref,event=branch
-          type=sha,prefix={{branch}}-
-          type=raw,value=latest,enable={{is_default_branch}}
-
-    - name: Build and push Docker image
-      uses: docker/build-push-action@v5
-      with:
-        context: .
-        platforms: linux/amd64,linux/arm64
-        push: true
-        tags: ${{ steps.meta.outputs.tags }}
-        labels: ${{ steps.meta.outputs.labels }}
-        cache-from: type=gha
-        cache-to: type=gha,mode=max
-        build-args: |
-          VERSION=${{ github.ref_name }}
-          COMMIT=${{ github.sha }}
-          DATE=${{ github.event.head_commit.timestamp }}
-
-  # Create GitHub release
-  create-release:
-    name: Create Release
-    runs-on: ubuntu-latest
-    needs: [build-binaries, build-docker]
     permissions:
       contents: write
-    
+
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-    - name: Download binary artifacts
-      uses: actions/download-artifact@v3
-      with:
-        name: binaries
-        path: ./binaries
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
 
-    - name: Generate release notes
-      id: release_notes
-      run: |
-        cat > release_notes.md << 'EOF'
-        ## 🚀 MyEncrypt Release ${{ github.ref_name }}
-        
-        ### 📦 Downloads
-        
-        #### Binaries
-        - **Linux AMD64**: `myencrypt-linux-amd64.tar.gz`
-        - **Linux ARM64**: `myencrypt-linux-arm64.tar.gz`
-        - **macOS ARM64**: `myencrypt-darwin-arm64.tar.gz`
-        - **Windows AMD64**: `myencrypt-windows-amd64.zip`
-        - **Windows ARM64**: `myencrypt-windows-arm64.zip`
-        
-        #### Docker Images
-        ```bash
-        # Pull the latest image
-        docker pull ghcr.io/${{ github.repository }}:${{ github.ref_name }}
-        
-        # Run with Docker
-        docker run -p 14000:14000 -v myencrypt_data:/data \
-          ghcr.io/${{ github.repository }}:${{ github.ref_name }}
-        ```
-        
-        ### 🔧 Installation
-        
-        #### Binary Installation
-        ```bash
-        # Linux/macOS
-        curl -L https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/myencrypt-$(uname -s | tr '[:upper:]' '[:lower:]')-$(uname -m | sed 's/x86_64/amd64/').tar.gz | tar -xz
-        sudo mv myencrypt-* /usr/local/bin/myencrypt
-        chmod +x /usr/local/bin/myencrypt
-        
-        # Windows (PowerShell)
-        Invoke-WebRequest -Uri "https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/myencrypt-windows-amd64.zip" -OutFile "myencrypt.zip"
-        Expand-Archive -Path "myencrypt.zip" -DestinationPath "."
-        ```
-        
-        ### 🐳 Docker Usage
-        
-        #### Quick Start
-        ```bash
-        # Start MyEncrypt server
-        docker run -d --name myencrypt \
-          -p 14000:14000 \
-          -v myencrypt_data:/data \
-          -e MYENCRYPT_ALLOWED_DOMAINS="localhost,*.localhost,*.local" \
-          ghcr.io/${{ github.repository }}:${{ github.ref_name }}
-        ```
-        
-        #### Docker Compose
-        ```yaml
-        version: '3.8'
-        services:
-          myencrypt:
-            image: ghcr.io/${{ github.repository }}:${{ github.ref_name }}
-            ports:
-              - "14000:14000"
-            environment:
-              - MYENCRYPT_ALLOWED_DOMAINS=localhost,*.localhost,*.local
-            volumes:
-              - myencrypt_data:/data
-        volumes:
-          myencrypt_data:
-        ```
-        
-        ### 📋 Environment Variables
-        - `MYENCRYPT_HTTP_PORT`: HTTP server port (default: 14000)
-        - `MYENCRYPT_BIND_ADDRESS`: Bind address (default: 0.0.0.0)
-        - `MYENCRYPT_ALLOWED_DOMAINS`: Allowed domains (comma-separated)
-        - `MYENCRYPT_CERT_STORE_PATH`: Certificate storage path (default: /data)
-        - `MYENCRYPT_DATABASE_PATH`: SQLite database path (default: /data/myencrypt.db)
-        
-        ### 🔍 Verification
-        ```bash
-        # Check version
-        myencrypt version
-        
-        # Verify Docker image
-        docker run --rm ghcr.io/${{ github.repository }}:${{ github.ref_name }} version
-        ```
-        
-        ---
-        
-        **Full Changelog**: https://github.com/${{ github.repository }}/compare/v0.0.1...${{ github.ref_name }}
-        EOF
+      - name: Create Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref }}
+          release_name: Release ${{ github.ref }}
+          draft: false
+          prerelease: false
 
-    - name: Create Release
-      uses: softprops/action-gh-release@v1
-      with:
-        tag_name: ${{ github.ref_name }}
-        name: MyEncrypt ${{ github.ref_name }}
-        body_path: release_notes.md
-        files: ./binaries/*
-        draft: false
-        prerelease: ${{ contains(github.ref_name, '-') }}
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build for Linux (amd64)
+        run: |
+          GOOS=linux GOARCH=amd64 go install -ldflags="-s -w" github.com/shibukawa/myencrypt/cmd/myencrypt@latest
+          mv /home/runner/go/bin/myencrypt myencrypt-linux-amd64
+      - name: Upload Linux (amd64) binary
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./myencrypt-linux-amd64
+          asset_name: myencrypt-linux-amd64
+          asset_content_type: application/octet-stream 
 
-  # Update Docker Hub (optional)
-  sync-dockerhub:
-    name: Sync to Docker Hub
-    runs-on: ubuntu-latest
-    needs: [build-docker]
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
-    
-    steps:
-    - name: Log in to Docker Hub
-      uses: docker/login-action@v3
-      with:
-        username: ${{ secrets.DOCKERHUB_USERNAME }}
-        password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Build for Windows (amd64)
+        run: |
+          GOOS=windows GOARCH=amd64 go install -trimpath -ldflags="-s -w" github.com/shibukawa/myencrypt/cmd/myencrypt@latest
+          mv /home/runner/go/bin/windows_amd64/myencrypt.exe myencrypt-windows-amd64.exe
+      - name: Upload Windows (amd64) binary
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./myencrypt-windows-amd64.exe
+          asset_name: myencrypt-windows-amd64.exe
+          asset_content_type: application/octet-stream 
 
-    - name: Tag and push to Docker Hub
-      run: |
-        # Pull from GitHub Container Registry
-        docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.ref_name }}
-        
-        # Tag for Docker Hub
-        docker tag ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.ref_name }} ${{ secrets.DOCKERHUB_USERNAME }}/myencrypt:${{ github.ref_name }}
-        docker tag ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.ref_name }} ${{ secrets.DOCKERHUB_USERNAME }}/myencrypt:latest
-        
-        # Push to Docker Hub
-        docker push ${{ secrets.DOCKERHUB_USERNAME }}/myencrypt:${{ github.ref_name }}
-        docker push ${{ secrets.DOCKERHUB_USERNAME }}/myencrypt:latest
+      - name: Build for macOS (arm64)
+        run: |
+          GOOS=darwin GOARCH=arm64 go install -trimpath -ldflags="-s -w" github.com/shibukawa/myencrypt/cmd/myencrypt@latest
+          mv /home/runner/go/bin/darwin_arm64/myencrypt myencrypt-darwin-arm64
+      - name: Upload macOS (arm64) binary
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./myencrypt-darwin-arm64
+          asset_name: myencrypt-darwin-arm64
+          asset_content_type: application/octet-stream 

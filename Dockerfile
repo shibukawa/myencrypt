@@ -19,9 +19,7 @@ RUN --mount=type=cache,target=/go/pkg/mod/ \
 # Build arguments for cross-compilation and version info
 ARG TARGETOS
 ARG TARGETARCH
-ARG VERSION=dev
-ARG COMMIT=unknown
-ARG DATE=unknown
+ARG VERSION=latest
 
 # Build the application.
 # Leverage a cache mount to /go/pkg/mod/ to speed up subsequent builds.
@@ -29,9 +27,27 @@ ARG DATE=unknown
 # source code into the container.
 RUN --mount=type=cache,target=/go/pkg/mod/ \
     --mount=type=bind,target=. \
-    CGO_ENABLED=1 GOOS=$TARGETOS GOARCH=$TARGETARCH \
-    go build -ldflags="-w -s -X main.version=${VERSION} -X main.commit=${COMMIT} -X main.date=${DATE}" \
-    -o /bin/myencrypt ./cmd/myencrypt
+    set -e && \
+    case "${TARGETOS}-${TARGETARCH}" in \
+        linux-arm64) \
+            echo "Setting up ARM64 cross-compilation..." && \
+            apt-get update -qq && \
+            apt-get install -y -qq gcc-aarch64-linux-gnu libc6-dev-arm64-cross && \
+            export CC=aarch64-linux-gnu-gcc && \
+            export CGO_ENABLED=1 ;; \
+        linux-amd64) \
+            echo "Setting up AMD64 compilation..." && \
+            export CC=gcc && \
+            export CGO_ENABLED=1 ;; \
+        *) \
+            echo "Unsupported platform: ${TARGETOS}-${TARGETARCH}" && \
+            exit 1 ;; \
+    esac && \
+    echo "Building for ${TARGETOS}/${TARGETARCH} with CC=${CC}" && \
+    GOOS=$TARGETOS GOARCH=$TARGETARCH \
+    go build -ldflags="-w -s -X main.Version=${VERSION}" \
+    -o /bin/myencrypt ./cmd/myencrypt && \
+    echo "Build completed successfully"
 
 ################################################################################
 # Runtime stage using distroless (CGO-enabled)

@@ -280,7 +280,7 @@ func handleRunCommand(cfg *config.Config, log *logger.Logger, dryRun bool, conta
 		if err != nil {
 			return fmt.Errorf("failed to load Docker configuration: %w", err)
 		}
-		
+
 		// Auto-initialize if needed in Docker mode
 		if finalCfg.AutoInit {
 			log.Info("Auto-initialization enabled in Docker mode")
@@ -319,23 +319,23 @@ func handleRunCommand(cfg *config.Config, log *logger.Logger, dryRun bool, conta
 			fmt.Printf("Container Detection: %t\n", incontainer.IsInContainer())
 		}
 		fmt.Println()
-		
+
 		// Validate configuration
 		if err := finalCfg.Validate(); err != nil {
 			fmt.Printf("❌ Configuration validation failed: %v\n", err)
 			return err
 		}
-		
+
 		// Check certificate manager initialization
 		certMgr := certmanager.New(finalCfg, log)
 		if err := certMgr.LoadAllowedDomains(); err != nil {
 			fmt.Printf("❌ Failed to load allowed domains: %v\n", err)
 			return err
 		}
-		
+
 		domains, _ := certMgr.ListAllowedDomains()
 		fmt.Printf("Allowed domains: %d configured\n", len(domains))
-		
+
 		// Check CA certificate
 		if err := certMgr.ValidateCA(); err != nil {
 			fmt.Printf("⚠️  CA certificate issue: %v\n", err)
@@ -343,7 +343,7 @@ func handleRunCommand(cfg *config.Config, log *logger.Logger, dryRun bool, conta
 		} else {
 			fmt.Println("✅ CA certificate is valid")
 		}
-		
+
 		fmt.Println()
 		fmt.Println("✅ Configuration check completed successfully!")
 		fmt.Println("   Ready to start server with: myencrypt run")
@@ -574,21 +574,12 @@ func handleConfigHelpCommand() error {
 	return nil
 }
 
+// Version is set at build time via -ldflags
+var Version = "latest"
+
 // handleVersionCommand handles version display
 func handleVersionCommand() error {
-	info := GetVersionInfo()
-	
-	fmt.Println(GetVersionString())
-	fmt.Println()
-	fmt.Printf("Version:    %s\n", info.Version)
-	fmt.Printf("Commit:     %s\n", info.Commit)
-	fmt.Printf("Built:      %s\n", info.Date)
-	fmt.Printf("Go version: %s\n", info.GoVersion)
-	fmt.Printf("Platform:   %s\n", info.Platform)
-	fmt.Println()
-	fmt.Println("MyEncrypt - Local ACME Certificate Authority")
-	fmt.Println("https://github.com/shibukawayoshiki/myencrypt2")
-	
+	fmt.Println("MyEncrypt v" + Version)
 	return nil
 }
 
@@ -800,15 +791,15 @@ func handleServiceRunCommand(cfg *config.Config, log *logger.Logger) error {
 func handleTestCommand(cfg *config.Config, log *logger.Logger, domain string) error {
 	fmt.Printf("Testing certificate generation for domain: %s\n", domain)
 	fmt.Println("================================================")
-	
+
 	// Initialize certificate manager
 	certMgr := certmanager.New(cfg, log)
-	
+
 	// Load allowed domains
 	if err := certMgr.LoadAllowedDomains(); err != nil {
 		return fmt.Errorf("failed to load allowed domains: %w", err)
 	}
-	
+
 	// Check if domain is allowed
 	if !certMgr.IsAllowedDomain(domain) {
 		fmt.Printf("❌ Domain '%s' is not in the allowed domains list\n", domain)
@@ -820,18 +811,18 @@ func handleTestCommand(cfg *config.Config, log *logger.Logger, domain string) er
 		fmt.Printf("\nTo add this domain: myencrypt domain add %s\n", domain)
 		return fmt.Errorf("domain not allowed")
 	}
-	
+
 	fmt.Printf("✅ Domain '%s' is allowed\n", domain)
-	
+
 	// Generate certificate
 	fmt.Println("\nGenerating certificate...")
 	cert, err := certMgr.GenerateCertificate(domain)
 	if err != nil {
 		return fmt.Errorf("failed to generate certificate: %w", err)
 	}
-	
+
 	fmt.Println("✅ Certificate generated successfully!")
-	
+
 	// Display certificate information
 	info := certMgr.GetCertificateInfo(cert)
 	fmt.Println("\nCertificate Information:")
@@ -842,18 +833,18 @@ func handleTestCommand(cfg *config.Config, log *logger.Logger, domain string) er
 	fmt.Printf("  Valid From: %s\n", info["valid_from"])
 	fmt.Printf("  Valid Until: %s\n", info["valid_until"])
 	fmt.Printf("  Remaining Days: %d\n", info["remaining_days"])
-	
+
 	if dnsNames, ok := info["dns_names"].([]string); ok && len(dnsNames) > 0 {
 		fmt.Printf("  DNS Names: %v\n", dnsNames)
 	}
-	
+
 	// Validate certificate
 	if err := certMgr.ValidateCertificate(cert); err != nil {
 		fmt.Printf("⚠️  Certificate validation warning: %v\n", err)
 	} else {
 		fmt.Println("✅ Certificate is valid")
 	}
-	
+
 	// Get certificate chain
 	chain, err := certMgr.GetCertificateChain(cert)
 	if err != nil {
@@ -861,27 +852,27 @@ func handleTestCommand(cfg *config.Config, log *logger.Logger, domain string) er
 	} else {
 		fmt.Printf("✅ Certificate chain length: %d bytes\n", len(chain))
 	}
-	
+
 	// Save certificate to files for inspection
 	certFile := fmt.Sprintf("test_%s.pem", strings.ReplaceAll(domain, "*", "wildcard"))
 	keyFile := fmt.Sprintf("test_%s.key", strings.ReplaceAll(domain, "*", "wildcard"))
-	
+
 	if err := os.WriteFile(certFile, cert.CertPEM, 0644); err != nil {
 		fmt.Printf("⚠️  Failed to save certificate file: %v\n", err)
 	} else {
 		fmt.Printf("📄 Certificate saved to: %s\n", certFile)
 	}
-	
+
 	if err := os.WriteFile(keyFile, cert.KeyPEM, 0600); err != nil {
 		fmt.Printf("⚠️  Failed to save private key file: %v\n", err)
 	} else {
 		fmt.Printf("🔐 Private key saved to: %s\n", keyFile)
 	}
-	
+
 	fmt.Println("\n🎉 Certificate generation test completed successfully!")
 	fmt.Printf("\nTo verify the certificate:\n")
 	fmt.Printf("  openssl x509 -in %s -text -noout\n", certFile)
 	fmt.Printf("  openssl x509 -in %s -noout -subject -dates\n", certFile)
-	
+
 	return nil
 }
