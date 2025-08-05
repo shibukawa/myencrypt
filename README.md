@@ -78,21 +78,14 @@ The project includes several example integrations demonstrating how to use MyEnc
 - **Access**: https://traefik.localhost:8444/
 - **Features**: Automatic certificate management, dashboard, load balancing
 
-### 2. Caddy Integration (`examples/caddy/`)
-- **Web Server**: Caddy
-- **ACME Client**: Built-in Caddy ACME
-- **Challenge Type**: TLS-ALPN-01
-- **Access**: https://app-caddy.localhost:8445/
-- **Features**: Automatic HTTPS, modern web server, easy configuration
-
-### 3. Certbot + Nginx Integration (`examples/certbot-nginx/`)
+### 2. Certbot + Nginx Integration (`examples/certbot-nginx/`)
 - **Web Server**: Nginx
 - **ACME Client**: Certbot (official Let's Encrypt client)
 - **Challenge Type**: HTTP-01 (webroot)
 - **Access**: https://app-certbot.localhost:8446/
 - **Features**: Traditional setup, manual certificate management, high performance
 
-### 4. Go autocert Integration (`examples/autocert/`)
+### 3. Go autocert Integration (`examples/autocert/`)
 - **Web Server**: Go HTTP server
 - **ACME Client**: golang.org/x/crypto/acme/autocert
 - **Challenge Type**: TLS-ALPN-01
@@ -110,9 +103,6 @@ Start specific examples:
 ```bash
 # Traefik only
 docker-compose up -d traefik.localhost
-
-# Caddy only  
-docker-compose up -d caddy.localhost
 
 # Certbot + Nginx only
 docker-compose up -d app-certbot.localhost

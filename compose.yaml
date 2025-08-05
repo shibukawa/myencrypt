@@ -9,7 +9,7 @@ services:
       - MYENCRYPT_PROJECT_NAME=myencrypt  # Required: Project name for Docker mode
       - MYENCRYPT_INDIVIDUAL_CERT_TTL=168h  # 7 days (7 * 24h)
       - MYENCRYPT_CA_CERT_TTL=19200h
-      - MYENCRYPT_ALLOWED_DOMAINS=localhost,*.localhost,*.test,*.example,*.invalid,app-traefik.localhost,app-caddy.localhost,app-certbot.localhost
+      - MYENCRYPT_ALLOWED_DOMAINS=localhost,*.localhost,*.test,*.example,*.invalid,app-traefik.localhost,app-certbot.localhost
       - MYENCRYPT_CERT_STORE_PATH=/data
       - MYENCRYPT_DATABASE_PATH=/data/myencrypt.db
       - MYENCRYPT_LOG_LEVEL=debug  # Enable debug logging
@@ -52,22 +52,6 @@ services:
       - "traefik.http.routers.app.tls.certresolver=myencrypt"
       - "traefik.http.services.app.loadbalancer.server.port=80"
       - "traefik.docker.network=myencrypt2_default"
-
-  # Caddy Reverse Proxy
-  caddy.localhost:
-    image: caddy:2-alpine
-    ports:
-      - "8083:80"    # HTTP (different port to avoid system port conflict)
-      - "8445:443"   # HTTPS (different port to avoid system port conflict)
-      - "8084:8080"  # Health check port
-    volumes:
-      - ./examples/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy_data:/data
-      - caddy_config:/config
-    depends_on:
-      - myencrypt
-      - simple-http-app
-    restart: unless-stopped
 
   # Traefik Reverse Proxy (alternative to Caddy)
   traefik.localhost:
@@ -117,8 +101,6 @@ services:
 volumes:
   myencrypt_data:
   autocert_cache:
-  caddy_data:
-  caddy_config:
   traefik_data:
   certbot_data:
   certbot_www:

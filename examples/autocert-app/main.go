@@ -76,11 +76,11 @@ const htmlTemplate = `
 `
 
 type PageData struct {
-	Domain            string
-	ServerTime        string
-	ACMEDirectoryURL  string
-	Port              string
-	TLSVersion        string
+	Domain           string
+	ServerTime       string
+	ACMEDirectoryURL string
+	Port             string
+	TLSVersion       string
 }
 
 func main() {
@@ -106,7 +106,7 @@ func main() {
 		Cache:       autocert.DirCache(cacheDir),
 		Prompt:      autocert.AcceptTOS,
 		HostPolicy:  autocert.HostWhitelist(domain),
-		RenewBefore: 7 * 24 * time.Hour, // Renew 7 days before expiration (for 31-day certs)
+		RenewBefore: 3 * time.Hour, // Renew 3 hours before expiration (for 31-day certs)
 		Client: &acme.Client{
 			DirectoryURL: acmeDirectoryURL,
 		},
@@ -115,7 +115,7 @@ func main() {
 	// Create HTTP handler
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		tmpl := template.Must(template.New("page").Parse(htmlTemplate))
-		
+
 		tlsVersion := "Unknown"
 		if r.TLS != nil {
 			switch r.TLS.Version {
@@ -131,11 +131,11 @@ func main() {
 		}
 
 		data := PageData{
-			Domain:            domain,
-			ServerTime:        time.Now().Format("2006-01-02 15:04:05 MST"),
-			ACMEDirectoryURL:  acmeDirectoryURL,
-			Port:              port,
-			TLSVersion:        tlsVersion,
+			Domain:           domain,
+			ServerTime:       time.Now().Format("2006-01-02 15:04:05 MST"),
+			ACMEDirectoryURL: acmeDirectoryURL,
+			Port:             port,
+			TLSVersion:       tlsVersion,
 		}
 
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -147,7 +147,7 @@ func main() {
 	// Health check endpoint
 	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprintf(w, `{"status":"healthy","domain":"%s","time":"%s"}`, 
+		fmt.Fprintf(w, `{"status":"healthy","domain":"%s","time":"%s"}`,
 			domain, time.Now().Format(time.RFC3339))
 	})
 
@@ -160,7 +160,7 @@ func main() {
 
 	log.Printf("Starting HTTPS server on port %s for domain %s", port, domain)
 	log.Printf("Visit: https://%s:%s", domain, port)
-	
+
 	// Start HTTPS server
 	if err := server.ListenAndServeTLS("", ""); err != nil {
 		log.Fatalf("HTTPS server failed: %v", err)
