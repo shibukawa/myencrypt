@@ -13,6 +13,7 @@ const htmlTemplate = `
 <!DOCTYPE html>
 <html>
 <head>
+    <meta charset="utf-8">
     <title>Simple HTTP Demo App</title>
     <style>
         body { font-family: Arial, sans-serif; margin: 40px; background: #f5f5f5; }
@@ -103,7 +104,7 @@ func main() {
 			RequestHeaders: headers,
 		}
 
-		w.Header().Set("Content-Type", "text/html")
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		if err := tmpl.Execute(w, data); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 		}

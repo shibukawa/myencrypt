@@ -13,33 +13,14 @@
 }
 
 # Shared HTTP app proxied with HTTPS via Caddy
-app.localhost {
-	reverse_proxy simple-http-app:8080
+app-caddy.localhost {
+	reverse_proxy simple-http-app:80
 	
 	# Add some headers to show it's proxied by Caddy
 	header {
 		X-Served-By "Caddy with MyEncrypt"
 		X-Protocol "HTTPS"
 		X-Proxy "Caddy"
-	}
-	
-	# Enable access logging
-	log {
-		output stdout
-		format console
-	}
-}
-
-# API endpoint (same app, different subdomain)
-api.localhost {
-	reverse_proxy simple-http-app:80
-	
-	# Add API-specific headers
-	header {
-		X-Served-By "Caddy with MyEncrypt"
-		X-Protocol "HTTPS"
-		X-Proxy "Caddy"
-		X-Service-Type "API"
 	}
 	
 	# Enable access logging

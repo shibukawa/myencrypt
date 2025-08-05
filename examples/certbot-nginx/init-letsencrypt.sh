@@ -2,7 +2,7 @@
 
 # MyEncrypt ACME server configuration
 ACME_SERVER="http://myencrypt:80/acme/directory"
-DOMAIN="nginx.localhost"
+DOMAIN="app-certbot.localhost"
 EMAIL="admin@example.com"
 
 echo "### Starting certificate initialization for $DOMAIN ###"
@@ -61,7 +61,7 @@ if [ $? -eq 0 ]; then
     nginx -s reload
     
     echo "### Setup complete! ###"
-    echo "You can now access https://nginx.localhost:8446/"
+    echo "You can now access https://app-certbot.localhost:8446/"
 else
     echo "### Certificate request failed! ###"
     echo "### Checking logs for debugging ###"
