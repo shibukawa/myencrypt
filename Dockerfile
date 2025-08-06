@@ -20,20 +20,23 @@ RUN apt-get update && \
         apt-get install -y build-essential ; \
     fi
 
-RUN if [ "$TARGETARCH" = "arm64" ]; then \
-        echo "export CC=aarch64-linux-gnu-gcc" >> /etc/environment; \
-    fi
-
-RUN env
-
 RUN --mount=type=cache,target=/go/pkg/mod/ \
     --mount=type=bind,source=go.sum,target=go.sum \
     --mount=type=bind,source=go.mod,target=go.mod \
-    go mod download -x
+    if [ "$TARGETARCH" = "arm64" ]; then \
+        CC=aarch64-linux-gnu-gcc go mod download -x ; \
+    elif [ "$TARGETARCH" = "amd64" ]; then \
+        go mod download -x ; \
+    fi
 
 RUN --mount=type=cache,target=/go/pkg/mod/ \
     --mount=type=bind,target=. \
-    go build -ldflags '-w -s -X "main.Version=${VERSION}"' -o /bin/myencrypt ./cmd/myencrypt
+    if [ "$TARGETARCH" = "arm64" ]; then \
+        CC=aarch64-linux-gnu-gcc \
+        go build -ldflags '-w -s -X "main.Version=${VERSION}"' -o /bin/myencrypt ./cmd/myencrypt \
+    elif [ "$TARGETARCH" = "amd64" ]; then \
+        go build -ldflags '-w -s -X "main.Version=${VERSION}"' -o /bin/myencrypt ./cmd/myencrypt \
+    fi
 
 FROM --platform=$BUILDPLATFORM gcr.io/distroless/static-debian12 AS final
 
