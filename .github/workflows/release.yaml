@@ -112,10 +112,10 @@ jobs:
         ARCHIVE_NAME="dist/myencrypt-${{ github.ref_name }}-${{ matrix.goos }}-${{ matrix.goarch }}"
         
         if [[ "${{ matrix.goos }}" == "windows" ]]; then
-          7z a "${ARCHIVE_NAME}.zip" "dist/$BINARY_NAME" README.md README.ja.md LICENSE.md
+          7z a "${ARCHIVE_NAME}.zip" "dist/$BINARY_NAME" README.md README.ja.md LICENSE
           echo "ARCHIVE_NAME=${ARCHIVE_NAME}.zip" >> $GITHUB_ENV
         else
-          tar -czf "${ARCHIVE_NAME}.tar.gz" "dist/$BINARY_NAME" README.md README.ja.md LICENSE.md
+          tar -czf "${ARCHIVE_NAME}.tar.gz" "dist/$BINARY_NAME" README.md README.ja.md LICENSE
           echo "ARCHIVE_NAME=${ARCHIVE_NAME}.tar.gz" >> $GITHUB_ENV
         fi
 
