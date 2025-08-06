@@ -14,9 +14,9 @@ ENV CGO_ENABLED=1 \
     GOARCH=$TARGETARCH
 
 RUN apt-get update && \
-    if [ "$GOARCH" = "arm64" ]; then \
+    if [ "$TARGETARCH" = "arm64" ]; then \
         apt-get install -y gcc-aarch64-linux-gnu libc6-dev-arm64-cross ; \
-    elif [ "$GOARCH" = "amd64" ]; then \
+    elif [ "$TARGETARCH" = "amd64" ]; then \
         apt-get install -y build-essential ; \
     fi
     
