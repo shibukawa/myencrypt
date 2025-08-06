@@ -19,11 +19,17 @@ RUN apt-get update && \
     elif [ "$TARGETARCH" = "amd64" ]; then \
         apt-get install -y build-essential ; \
     fi
-    
+
+RUN if [ "$TARGETARCH" = "arm64" ]; then \
+        echo "export CC=aarch64-linux-gnu-gcc" >> /etc/environment; \
+    fi
+
+RUN env
+
 RUN --mount=type=cache,target=/go/pkg/mod/ \
     --mount=type=bind,source=go.sum,target=go.sum \
     --mount=type=bind,source=go.mod,target=go.mod \
-    GOARCH=$TARGETARCH go mod download -x
+    go mod download -x
 
 RUN --mount=type=cache,target=/go/pkg/mod/ \
     --mount=type=bind,target=. \
