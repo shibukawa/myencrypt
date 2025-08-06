@@ -108,14 +108,14 @@ jobs:
     - name: Create archive
       shell: bash
       run: |
-        BINARY_NAME="myencrypt-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }}"
-        ARCHIVE_NAME="myencrypt-${{ github.ref_name }}-${{ matrix.goos }}-${{ matrix.goarch }}"
+        BINARY_NAME="dist/myencrypt-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }}"
+        ARCHIVE_NAME="dist/myencrypt-${{ github.ref_name }}-${{ matrix.goos }}-${{ matrix.goarch }}"
         
         if [[ "${{ matrix.goos }}" == "windows" ]]; then
-          7z a "${ARCHIVE_NAME}.zip" "$BINARY_NAME" README.md
+          7z a "${ARCHIVE_NAME}.zip" "dist/$BINARY_NAME" README.md README.ja.md LICENSE.md
           echo "ARCHIVE_NAME=${ARCHIVE_NAME}.zip" >> $GITHUB_ENV
         else
-          tar -czf "${ARCHIVE_NAME}.tar.gz" "$BINARY_NAME" README.md
+          tar -czf "${ARCHIVE_NAME}.tar.gz" "dist/$BINARY_NAME" README.md README.ja.md LICENSE.md
           echo "ARCHIVE_NAME=${ARCHIVE_NAME}.tar.gz" >> $GITHUB_ENV
         fi
 
