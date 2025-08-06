@@ -16,21 +16,19 @@ RUN --mount=type=cache,target=/go/pkg/mod/ \
     --mount=type=bind,source=go.mod,target=go.mod \
     GOARCH=$TARGETARCH go mod download -x
 
+ARG TARGETOS
 ARG TARGETARCH
 ARG VERSION=latest
 
+ENV CGO_ENABLED=1 \
+    GOOS=$TARGETOS \
+    GOARCH=$TARGETARCH
+
 RUN --mount=type=cache,target=/go/pkg/mod/ \
     --mount=type=bind,target=. \
-    CGO_ENABLED=1 GOARCH=$TARGETARCH go build -ldflags '-w -s -X "main.Version=${VERSION}"' -o /bin/myencrypt ./cmd/myencrypt
+    go build -ldflags '-w -s -X "main.Version=${VERSION}"' -o /bin/myencrypt ./cmd/myencrypt
 
-# Use base image with libc for CGO support
-FROM debian:12-slim AS final
-
-# Install runtime dependencies
-RUN apt-get update && apt-get install -y \
-    ca-certificates \
-    sqlite3 \
-    && rm -rf /var/lib/apt/lists/*
+FROM --platform=$BUILDPLATFORM gcr.io/distroless/static-debian12 AS final
 
 ENV MYENCRYPT_EXPOSE_PORT=14000 \
     MYENCRYPT_PROJECT_NAME=myencrypt \
