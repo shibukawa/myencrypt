@@ -19,15 +19,19 @@ jobs:
           - os: windows-latest
             goos: windows
             goarch: amd64
+            ext: .exe
           - os: macos-latest
             goos: darwin
             goarch: arm64
+            ext: ""
           - os: ubuntu-latest
             goos: linux
             goarch: amd64
+            ext: ""
           - os: ubuntu-24.04-arm
             goos: linux
             goarch: arm64
+            ext: ""
     runs-on: ${{ matrix.os }}
     
     steps:
@@ -81,13 +85,10 @@ jobs:
       run: |
         mkdir -p dist
         BINARY_NAME="myencrypt-${{ matrix.goos }}-${{ matrix.goarch }}"
-        ARCHIVE_NAME="myencrypt-${{ github.ref_name }}-${{ matrix.goos }}-${{ matrix.goarch }}.tar.gz"
         go build \
           -ldflags "-w -s -X 'main.Version=${{ github.ref_name }}'" \
           -o "dist/${BINARY_NAME}" \
           ./cmd/myencrypt
-        tar -czf "${ARCHIVE_NAME}" "dist/${BINARY_NAME}"
-        echo "Created ${ARCHIVE_NAME}"
 
     - name: Build (Windows)
       if: runner.os == 'Windows'
@@ -99,14 +100,25 @@ jobs:
       run: |
         mkdir -p dist
         BINARY_NAME="myencrypt-${{ matrix.goos }}-${{ matrix.goarch }}.exe"
-        ARCHIVE_NAME="myencrypt-${{ github.ref_name }}-${{ matrix.goos }}-${{ matrix.goarch }}.zip"
         go build \
           -ldflags "-w -s -X 'main.Version=${{ github.ref_name }}'" \
           -o "dist/${BINARY_NAME}" \
           ./cmd/myencrypt
-        zip "$ARCHIVE_NAME" "dist/${BINARY_NAME}"
-        echo "Created ${ARCHIVE_NAME}"
+
+    - name: Create archive
+      shell: bash
+      run: |
+        BINARY_NAME="myencrypt-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }}"
+        ARCHIVE_NAME="myencrypt-${{ github.ref_name }}-${{ matrix.goos }}-${{ matrix.goarch }}"
         
+        if [[ "${{ matrix.goos }}" == "windows" ]]; then
+          7z a "${ARCHIVE_NAME}.zip" "$BINARY_NAME" README.md
+          echo "ARCHIVE_NAME=${ARCHIVE_NAME}.zip" >> $GITHUB_ENV
+        else
+          tar -czf "${ARCHIVE_NAME}.tar.gz" "$BINARY_NAME" README.md
+          echo "ARCHIVE_NAME=${ARCHIVE_NAME}.tar.gz" >> $GITHUB_ENV
+        fi
+
     - name: Upload release assets
       uses: actions/upload-artifact@v4
       with:
