@@ -9,10 +9,8 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
-
   build-binaries:
     name: Build Binaries
-    
     strategy:
       matrix:
         include:
@@ -72,10 +70,10 @@ jobs:
         key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
         restore-keys: |
           ${{ runner.os }}-go-
-          
+
     - name: Download dependencies
       run: go mod download
-      
+
     - name: Build (Linux/macOS)
       if: runner.os != 'Windows'
       env:
@@ -151,7 +149,7 @@ jobs:
         registry: ${{ env.REGISTRY }}
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
-        
+
     - name: Extract metadata
       id: meta
       uses: docker/metadata-action@v5
@@ -163,7 +161,7 @@ jobs:
           type=semver,pattern={{major}}.{{minor}}
           type=semver,pattern={{major}}
           type=raw,value=latest,enable={{is_default_branch}}
-        
+
     - name: Build and push Docker image
       uses: docker/build-push-action@v6
       with:
@@ -183,23 +181,23 @@ jobs:
     needs: [build-binaries, build-docker]
     permissions:
       contents: write
-    
+
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
-      
+
     - name: Download all release assets
       uses: actions/download-artifact@v4
       with:
         pattern: release-assets-*
         path: artifacts
         merge-multiple: true
-        
+
     - name: List downloaded artifacts
       run: |
         echo "Downloaded artifacts:"
         find artifacts -type f -name "*.zip" -o -name "*.tar.gz" | sort
-        
+
     - name: Generate release notes
       id: release_notes
       run: |
@@ -245,7 +243,7 @@ jobs:
         - ✅ Multi-architecture support
         - ✅ Standards compliance verified
         EOF
-        
+
     - name: Create Release
       uses: softprops/action-gh-release@v2
       with:

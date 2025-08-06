@@ -13,6 +13,13 @@ ENV CGO_ENABLED=1 \
     GOOS=$TARGETOS \
     GOARCH=$TARGETARCH
 
+RUN apt-get update && \
+    if [ "$GOARCH" = "arm64" ]; then \
+        apt-get install -y gcc-aarch64-linux-gnu libc6-dev-arm64-cross ; \
+    elif [ "$GOARCH" = "amd64" ]; then \
+        apt-get install -y build-essential ; \
+    fi
+    
 RUN --mount=type=cache,target=/go/pkg/mod/ \
     --mount=type=bind,source=go.sum,target=go.sum \
     --mount=type=bind,source=go.mod,target=go.mod \
