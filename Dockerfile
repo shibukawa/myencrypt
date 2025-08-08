@@ -35,7 +35,7 @@ RUN --mount=type=cache,target=/go/pkg/mod/ \
     fi && \
     CGO_ENABLED=1 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -ldflags '-w -s -X "main.version=${VERSION}"' -o /bin/myencrypt ./cmd/myencrypt
 
-FROM --platform=$BUILDPLATFORM gcr.io/distroless/base-debian12 AS final
+FROM gcr.io/distroless/base-debian12 AS final
 
 ENV MYENCRYPT_EXPOSE_PORT=14000 \
     MYENCRYPT_PROJECT_NAME=myencrypt \
