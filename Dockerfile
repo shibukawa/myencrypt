@@ -11,16 +11,31 @@ ARG VERSION=latest
 
 ENV CGO_ENABLED=1
 
+RUN apt-get update && apt-get install -y \
+    gcc-aarch64-linux-gnu \
+    gcc-x86-64-linux-gnu \
+    && rm -rf /var/lib/apt/lists/*
+
 RUN --mount=type=cache,target=/go/pkg/mod/ \
     --mount=type=bind,source=go.sum,target=go.sum \
     --mount=type=bind,source=go.mod,target=go.mod \
-    go mod download -x ;
+    if [ "$TARGETARCH" = "amd64" ]; then \
+        export CC=x86_64-linux-gnu-gcc; \
+    elif [ "$TARGETARCH" = "arm64" ]; then \
+        export CC=aarch64-linux-gnu-gcc; \
+    fi && \
+    go mod download -x
 
 RUN --mount=type=cache,target=/go/pkg/mod/ \
     --mount=type=bind,target=. \
-    go build -ldflags '-w -s -X "main.Version=${VERSION}"' -o /bin/myencrypt ./cmd/myencrypt
+    if [ "$TARGETARCH" = "amd64" ]; then \
+        export CC=x86_64-linux-gnu-gcc; \
+    elif [ "$TARGETARCH" = "arm64" ]; then \
+        export CC=aarch64-linux-gnu-gcc; \
+    fi && \
+    go build -ldflags '-w -s -X "main.version=${VERSION}"' -o /bin/myencrypt ./cmd/myencrypt
 
-FROM --platform=$BUILDPLATFORM gcr.io/distroless/static-debian12 AS final
+FROM --platform=$BUILDPLATFORM gcr.io/distroless/base-debian12 AS final
 
 ENV MYENCRYPT_EXPOSE_PORT=14000 \
     MYENCRYPT_PROJECT_NAME=myencrypt \
@@ -31,7 +46,7 @@ ENV MYENCRYPT_EXPOSE_PORT=14000 \
     MYENCRYPT_DATABASE_PATH=/data/myencrypt.db \
     MYENCRYPT_LOG_LEVEL=info
 
-COPY --from=build /bin/myencrypt /bin/
+COPY --from=build /bin/myencrypt /bin/myencrypt
 
 EXPOSE 80
 
