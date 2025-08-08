@@ -165,7 +165,7 @@ jobs:
       id: meta
       uses: docker/metadata-action@v5
       with:
-        images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+        images: ${{ env.REGISTRY_IMAGE }}
         tags: |
           type=ref,event=tag
           type=semver,pattern={{version}}
@@ -178,8 +178,6 @@ jobs:
       uses: docker/build-push-action@v6
       with:
         platforms: ${{ matrix.platform }}
-        push: true
-        tags: ${{ steps.meta.outputs.tags }}
         labels: ${{ steps.meta.outputs.labels }}
         outputs: type=image,push-by-digest=true,name-canonical=true,push=true
         build-args: |
