@@ -33,7 +33,7 @@ RUN --mount=type=cache,target=/go/pkg/mod/ \
     elif [ "$TARGETARCH" = "arm64" ]; then \
         export CC=aarch64-linux-gnu-gcc; \
     fi && \
-    go build -ldflags '-w -s -X "main.version=${VERSION}"' -o /bin/myencrypt ./cmd/myencrypt
+    CGO_ENABLED=1 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -ldflags '-w -s -X "main.version=${VERSION}"' -o /bin/myencrypt ./cmd/myencrypt
 
 FROM --platform=$BUILDPLATFORM gcr.io/distroless/base-debian12 AS final
 
