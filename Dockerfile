@@ -50,7 +50,7 @@ COPY --from=build /bin/myencrypt /bin/myencrypt
 
 # Add health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD ["/bin/myencrypt", "healthcheck"] || exit 1
+    CMD ["/bin/myencrypt", "healthcheck"]
 
 EXPOSE 80
 

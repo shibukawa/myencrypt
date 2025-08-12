@@ -16,7 +16,7 @@ services:
     volumes:
       - myencrypt_data:/data  # Only MyEncrypt data needs persistence
     healthcheck:
-      test: ["/bin/myencrypt", "healthcheck"]
+      test: ["CMD", "/bin/myencrypt", "healthcheck"]
       interval: 30s
       timeout: 10s
       start_period: 5s
