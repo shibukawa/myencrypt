@@ -699,10 +699,15 @@ install_java() {
     
     if [[ -n "$keytool" ]]; then
         # Convert PEM to DER format for Java
-        openssl x509 -outform der -in /tmp/myencrypt-rootCA.pem -out /tmp/myencrypt-rootCA.der 2>/dev/null || return 1
+        if ! openssl x509 -outform der -in /tmp/myencrypt-rootCA.pem -out /tmp/myencrypt-rootCA.der 2>/dev/null; then
+            echo "⚠️  Failed to convert certificate to DER format for Java"
+            return 1
+        fi
         
         # Install to Java keystore (try common locations)
         local installed=false
+        local attempted_keystores=()
+        
         for cacerts in \
             "$JAVA_HOME/lib/security/cacerts" \
             "$JAVA_HOME/jre/lib/security/cacerts" \
@@ -712,17 +717,57 @@ install_java() {
             "/System/Library/Java/Support/CoreDeploy.bundle/Contents/Home/lib/security/cacerts" \
             "/Library/Java/JavaVirtualMachines/*/Contents/Home/lib/security/cacerts"; do
             
-            if [[ -f "$cacerts" ]] && [[ -w "$cacerts" || -w "$(dirname "$cacerts")" ]]; then
-                if sudo "$keytool" -importcert -file /tmp/myencrypt-rootCA.der -alias myencrypt-ca -keystore "$cacerts" -storepass changeit -noprompt 2>/dev/null; then
-                    echo "✅ CA certificate installed to Java keystore: $cacerts"
-                    installed=true
-                    break
+            # Handle glob patterns
+            for keystore_path in $cacerts; do
+                if [[ -f "$keystore_path" ]]; then
+                    attempted_keystores+=("$keystore_path")
+                    
+                    # First try without sudo (if user has write access)
+                    if [[ -w "$keystore_path" ]]; then
+                        if "$keytool" -importcert -file /tmp/myencrypt-rootCA.der -alias myencrypt-ca -keystore "$keystore_path" -storepass changeit -noprompt 2>/dev/null; then
+                            echo "✅ CA certificate installed to Java keystore: $keystore_path"
+                            installed=true
+                            break 2
+                        fi
+                    fi
+                    
+                    # Try with sudo if directory is writable or if we can sudo
+                    if [[ -w "$(dirname "$keystore_path")" ]] || sudo -n true 2>/dev/null; then
+                        # Check if certificate already exists
+                        if sudo "$keytool" -list -alias myencrypt-ca -keystore "$keystore_path" -storepass changeit -noprompt 2>/dev/null; then
+                            echo "ℹ️  CA certificate already exists in Java keystore: $keystore_path"
+                            installed=true
+                            break 2
+                        fi
+                        
+                        # Try to install with sudo
+                        if sudo "$keytool" -importcert -file /tmp/myencrypt-rootCA.der -alias myencrypt-ca -keystore "$keystore_path" -storepass changeit -noprompt 2>/dev/null; then
+                            echo "✅ CA certificate installed to Java keystore: $keystore_path"
+                            installed=true
+                            break 2
+                        fi
+                    fi
                 fi
-            fi
+            done
         done
         
         if [[ "$installed" == false ]]; then
-            echo "⚠️  Java keystore found but installation failed (try running as administrator)"
+            if [[ ${#attempted_keystores[@]} -eq 0 ]]; then
+                echo "ℹ️  No Java keystores found"
+            else
+                echo "⚠️  Java keystore installation failed for all attempted locations:"
+                for keystore in "${attempted_keystores[@]}"; do
+                    echo "     - $keystore"
+                done
+                echo ""
+                echo "To manually install the certificate to Java keystore:"
+                echo "   sudo keytool -importcert -file /tmp/myencrypt-rootCA.der -alias myencrypt-ca -keystore /path/to/cacerts -storepass changeit -noprompt"
+                echo ""
+                echo "Common keystore locations:"
+                echo "   - \$JAVA_HOME/lib/security/cacerts"
+                echo "   - /usr/lib/jvm/default-java/lib/security/cacerts"
+                echo "   - /Library/Java/JavaVirtualMachines/*/Contents/Home/lib/security/cacerts (macOS)"
+            fi
         fi
         
         rm -f /tmp/myencrypt-rootCA.der
@@ -808,131 +853,75 @@ func (s *Server) handleDownloadInstallPs1(w http.ResponseWriter, r *http.Request
 		scriptPort = s.config.HTTPPort
 	}
 
-	script := fmt.Sprintf(`# MyEncrypt CA Installation Script (PowerShell)
-
-Write-Host "Installing MyEncrypt CA certificate..." -ForegroundColor Green
-
-try {
-    # Download CA certificate
-    $tempFile = [System.IO.Path]::GetTempFileName() + ".pem"
-    Invoke-WebRequest -Uri "http://localhost:%d/download/certificate" -OutFile $tempFile
-    
-    # Install to Windows certificate store
-    $cert = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2($tempFile)
-    $store = New-Object System.Security.Cryptography.X509Certificates.X509Store("Root", "LocalMachine")
-    $store.Open("ReadWrite")
-    $store.Add($cert)
-    $store.Close()
-    
-    Write-Host "✅ CA certificate installed to Windows certificate store" -ForegroundColor Green
-    
-    # Install to Java keystore
-    function Install-JavaKeystore {
-        $javaHome = $env:JAVA_HOME
-        $keytool = $null
-        
-        # Find Java installation
-        if ($javaHome -and (Test-Path "$javaHome\bin\keytool.exe")) {
-            $keytool = "$javaHome\bin\keytool.exe"
-        } elseif (Get-Command keytool -ErrorAction SilentlyContinue) {
-            $keytool = "keytool"
-        }
-        
-        if ($keytool) {
-            # Convert PEM to DER format for Java
-            $derFile = [System.IO.Path]::GetTempFileName() + ".der"
-            try {
-                $pemContent = Get-Content $tempFile -Raw
-                $cert = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new([System.Text.Encoding]::UTF8.GetBytes($pemContent))
-                [System.IO.File]::WriteAllBytes($derFile, $cert.RawData)
-                
-                # Try common Java keystore locations
-                $cacertsPaths = @(
-                    "$javaHome\lib\security\cacerts",
-                    "$javaHome\jre\lib\security\cacerts"
-                )
-                
-                $installed = $false
-                foreach ($cacerts in $cacertsPaths) {
-                    if (Test-Path $cacerts) {
-                        try {
-                            & $keytool -importcert -file $derFile -alias myencrypt-ca -keystore $cacerts -storepass changeit -noprompt 2>$null
-                            if ($LASTEXITCODE -eq 0) {
-                                Write-Host "✅ CA certificate installed to Java keystore: $cacerts" -ForegroundColor Green
-                                $installed = $true
-                                break
-                            }
-                        } catch { }
-                    }
-                }
-                
-                if (-not $installed) {
-                    Write-Host "⚠️  Java keystore found but installation failed (try running as administrator)" -ForegroundColor Yellow
-                }
-            } finally {
-                if (Test-Path $derFile) { Remove-Item $derFile -Force }
-            }
-        } else {
-            Write-Host "ℹ️  Java not found, skipping Java keystore installation" -ForegroundColor Cyan
-        }
-    }
-    
-    # Install to NSS databases (Firefox)
-    function Install-NSSDatabase {
-        if (-not (Get-Command certutil -ErrorAction SilentlyContinue)) {
-            Write-Host "ℹ️  NSS tools not found, skipping NSS database installation" -ForegroundColor Cyan
-            return
-        }
-        
-        $installed = $false
-        $appData = $env:APPDATA
-        if ($appData) {
-            $firefoxProfilesPath = "$appData\Mozilla\Firefox\Profiles"
-            if (Test-Path $firefoxProfilesPath) {
-                $profiles = Get-ChildItem $firefoxProfilesPath -Directory
-                foreach ($profile in $profiles) {
-                    if ((Test-Path "$($profile.FullName)\cert9.db") -or (Test-Path "$($profile.FullName)\cert8.db")) {
-                        try {
-                            & certutil -A -n "MyEncrypt Development CA" -t "C,," -i $tempFile -d $profile.FullName 2>$null
-                            if ($LASTEXITCODE -eq 0) {
-                                Write-Host "✅ CA certificate installed to NSS database: $($profile.FullName)" -ForegroundColor Green
-                                $installed = $true
-                            }
-                        } catch { }
-                    }
-                }
-            }
-        }
-        
-        if (-not $installed) {
-            Write-Host "ℹ️  No NSS databases found or installation failed" -ForegroundColor Cyan
-        }
-    }
-    
-    # Install to additional trust stores
-    Write-Host ""
-    Write-Host "Installing to additional trust stores..." -ForegroundColor Green
-    Install-JavaKeystore
-    Install-NSSDatabase
-    
-    Write-Host ""
-    Write-Host "🎉 MyEncrypt CA installation completed!" -ForegroundColor Green
-    Write-Host "ACME server URL: http://localhost:%d/acme/directory" -ForegroundColor Yellow
-    Write-Host ""
-    Write-Host "To uninstall the CA certificate later:" -ForegroundColor Yellow
-    Write-Host "   curl http://localhost:%d/download/uninstall.ps1 -o uninstall.ps1; .\\uninstall.ps1" -ForegroundColor Cyan
-    Write-Host ""
-    Write-Host "To remove ALL MyEncrypt CA certificates:" -ForegroundColor Yellow
-    Write-Host "   curl http://localhost:%d/download/uninstall-all.ps1 -o uninstall-all.ps1; .\\uninstall-all.ps1" -ForegroundColor Cyan
-    
-    # Cleanup
-    Remove-Item $tempFile -Force
-}
-catch {
-    Write-Host "❌ Installation failed: $_" -ForegroundColor Red
-    exit 1
-}
-`, scriptPort, scriptPort, scriptPort, scriptPort)
+	script := fmt.Sprintf("# MyEncrypt CA Installation Script (PowerShell)\n\n"+
+		"Write-Host \"Installing MyEncrypt CA certificate...\" -ForegroundColor Green\n\n"+
+		"try {\n"+
+		"    # Download CA certificate\n"+
+		"    $tempFile = [System.IO.Path]::GetTempFileName() + \".pem\"\n"+
+		"    Invoke-WebRequest -Uri \"http://localhost:%d/download/certificate\" -OutFile $tempFile\n"+
+		"    \n"+
+		"    # Install to Windows certificate store\n"+
+		"    $cert = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2($tempFile)\n"+
+		"    $store = New-Object System.Security.Cryptography.X509Certificates.X509Store(\"Root\", \"LocalMachine\")\n"+
+		"    $store.Open(\"ReadWrite\")\n"+
+		"    $store.Add($cert)\n"+
+		"    $store.Close()\n"+
+		"    \n"+
+		"    Write-Host \"✅ CA certificate installed to Windows certificate store\" -ForegroundColor Green\n"+
+		"    \n"+
+		"    # Try to install to Java keystore if available\n"+
+		"    $javaHome = $env:JAVA_HOME\n"+
+		"    if ($javaHome -and (Test-Path \"$javaHome\\bin\\keytool.exe\")) {\n"+
+		"        $keytool = \"$javaHome\\bin\\keytool.exe\"\n"+
+		"        $cacerts = \"$javaHome\\lib\\security\\cacerts\"\n"+
+		"        \n"+
+		"        if (Test-Path $cacerts) {\n"+
+		"            # Convert PEM to DER format for Java\n"+
+		"            $derFile = [System.IO.Path]::GetTempFileName() + \".der\"\n"+
+		"            try {\n"+
+		"                $pemContent = Get-Content $tempFile -Raw\n"+
+		"                $certObj = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new([System.Text.Encoding]::UTF8.GetBytes($pemContent))\n"+
+		"                [System.IO.File]::WriteAllBytes($derFile, $certObj.RawData)\n"+
+		"                \n"+
+		"                # Check if certificate already exists\n"+
+		"                $checkResult = & $keytool -list -alias myencrypt-ca -keystore $cacerts -storepass changeit -noprompt 2>$null\n"+
+		"                if ($LASTEXITCODE -eq 0) {\n"+
+		"                    Write-Host \"ℹ️  CA certificate already exists in Java keystore\" -ForegroundColor Cyan\n"+
+		"                } else {\n"+
+		"                    # Try to install certificate\n"+
+		"                    $installResult = & $keytool -importcert -file $derFile -alias myencrypt-ca -keystore $cacerts -storepass changeit -noprompt 2>$null\n"+
+		"                    if ($LASTEXITCODE -eq 0) {\n"+
+		"                        Write-Host \"✅ CA certificate installed to Java keystore\" -ForegroundColor Green\n"+
+		"                    } else {\n"+
+		"                        Write-Host \"⚠️  Java keystore installation failed. Try running as Administrator:\" -ForegroundColor Yellow\n"+
+		"                        Write-Host \"   keytool -importcert -file '$derFile' -alias myencrypt-ca -keystore '$cacerts' -storepass changeit -noprompt\" -ForegroundColor Yellow\n"+
+		"                    }\n"+
+		"                }\n"+
+		"            } catch {\n"+
+		"                Write-Host \"⚠️  Error processing Java keystore: $($_.Exception.Message)\" -ForegroundColor Yellow\n"+
+		"            } finally {\n"+
+		"                if (Test-Path $derFile) { Remove-Item $derFile -Force }\n"+
+		"            }\n"+
+		"        }\n"+
+		"    } else {\n"+
+		"        Write-Host \"ℹ️  Java not found, skipping Java keystore installation\" -ForegroundColor Cyan\n"+
+		"    }\n"+
+		"    \n"+
+		"    # Cleanup\n"+
+		"    Remove-Item $tempFile -Force\n"+
+		"    \n"+
+		"    Write-Host \"\"\n"+
+		"    Write-Host \"🎉 MyEncrypt CA installation completed!\" -ForegroundColor Green\n"+
+		"    Write-Host \"ACME server URL: http://localhost:%d/acme/directory\" -ForegroundColor Cyan\n"+
+		"    Write-Host \"\"\n"+
+		"    Write-Host \"To uninstall the CA certificate later:\" -ForegroundColor Yellow\n"+
+		"    Write-Host \"   Invoke-WebRequest -Uri http://localhost:%d/download/uninstall.ps1 -UseBasicParsing | Invoke-Expression\" -ForegroundColor Yellow\n"+
+		"}\n"+
+		"catch {\n"+
+		"    Write-Host \"❌ Installation failed: $_\" -ForegroundColor Red\n"+
+		"    exit 1\n"+
+		"}\n",
+		scriptPort, scriptPort, scriptPort)
 
 	w.Header().Set("Content-Type", "text/plain")
 	w.Header().Set("Content-Disposition", "attachment; filename=\"install.ps1\"")
