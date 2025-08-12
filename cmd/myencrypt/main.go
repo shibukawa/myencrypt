@@ -19,10 +19,14 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 package main
 
 import (
+	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/shibukawa/incontainer"
 	"github.com/shibukawa/myencrypt/internal/certmanager"
@@ -52,13 +56,14 @@ type CLI struct {
 	RunMode           string `help:"Service run mode" default:"service" enum:"service,docker,standalone" env:"MYENCRYPT_RUN_MODE" group:"service"`
 
 	// Commands
-	Init    InitCmd    `cmd:"" help:"Initialize CA certificate and generate installation scripts"`
-	Run     RunCmd     `cmd:"" help:"Run myencrypt server"`
-	Test    TestCmd    `cmd:"" help:"Test certificate generation (for development)"`
-	Service ServiceCmd `cmd:"" help:"Manage myencrypt as an OS service"`
-	Domain  DomainCmd  `cmd:"" help:"Manage allowed domains"`
-	Config  ConfigCmd  `cmd:"" help:"Show configuration information and help"`
-	Version VersionCmd `cmd:"" help:"Show version information"`
+	Init        InitCmd        `cmd:"" help:"Initialize CA certificate and generate installation scripts"`
+	Run         RunCmd         `cmd:"" help:"Run myencrypt server"`
+	Test        TestCmd        `cmd:"" help:"Test certificate generation (for development)"`
+	Service     ServiceCmd     `cmd:"" help:"Manage myencrypt as an OS service"`
+	Domain      DomainCmd      `cmd:"" help:"Manage allowed domains"`
+	Config      ConfigCmd      `cmd:"" help:"Show configuration information and help"`
+	Version     VersionCmd     `cmd:"" help:"Show version information"`
+	Healthcheck HealthcheckCmd `cmd:"" help:"Check if MyEncrypt server is healthy (for Docker healthcheck)"`
 }
 
 // InitCmd handles the init command
@@ -146,6 +151,12 @@ type ConfigValidateCmd struct{}
 
 // ConfigHelpCmd shows configuration help
 type ConfigHelpCmd struct{}
+
+// HealthcheckCmd handles health check for Docker
+type HealthcheckCmd struct {
+	URL     string `help:"Health check URL" default:"http://localhost:80/health"`
+	Timeout string `help:"Request timeout" default:"5s"`
+}
 
 // VersionCmd handles version display
 type VersionCmd struct{}
@@ -265,6 +276,8 @@ func main() {
 		err = handleConfigValidateCommand(cfg, log)
 	case "config help":
 		err = handleConfigHelpCommand()
+	case "healthcheck":
+		err = handleHealthcheckCommand(cli.Healthcheck.URL, cli.Healthcheck.Timeout)
 	case "version":
 		err = handleVersionCommand()
 	default:
@@ -892,5 +905,58 @@ func handleTestCommand(cfg *config.Config, log *logger.Logger, domain string) er
 	fmt.Printf("  openssl x509 -in %s -text -noout\n", certFile)
 	fmt.Printf("  openssl x509 -in %s -noout -subject -dates\n", certFile)
 
+	return nil
+}
+
+// handleHealthcheckCommand performs a health check for Docker healthcheck
+func handleHealthcheckCommand(url, timeoutStr string) error {
+	// Parse timeout
+	timeout, err := time.ParseDuration(timeoutStr)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Invalid timeout format: %v\n", err)
+		return err
+	}
+
+	// Create HTTP client with timeout
+	client := &http.Client{
+		Timeout: timeout,
+	}
+
+	// Make health check request
+	resp, err := client.Get(url)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Health check failed: %v\n", err)
+		return err
+	}
+	defer resp.Body.Close()
+
+	// Check status code
+	if resp.StatusCode != http.StatusOK {
+		fmt.Fprintf(os.Stderr, "Health check failed: HTTP %d\n", resp.StatusCode)
+		return fmt.Errorf("health check failed with status %d", resp.StatusCode)
+	}
+
+	// Read and parse response
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to read health check response: %v\n", err)
+		return err
+	}
+
+	var healthResponse map[string]interface{}
+	if err := json.Unmarshal(body, &healthResponse); err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to parse health check response: %v\n", err)
+		return err
+	}
+
+	// Check status field
+	status, ok := healthResponse["status"].(string)
+	if !ok || status != "healthy" {
+		fmt.Fprintf(os.Stderr, "Health check failed: status is not healthy\n")
+		return fmt.Errorf("health check failed: status is %v", status)
+	}
+
+	// Health check passed
+	fmt.Println("Health check passed")
 	return nil
 }
