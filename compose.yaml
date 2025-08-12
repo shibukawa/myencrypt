@@ -15,6 +15,12 @@ services:
       - MYENCRYPT_LOG_LEVEL=debug  # Enable debug logging
     volumes:
       - myencrypt_data:/data  # Only MyEncrypt data needs persistence
+    healthcheck:
+      test: ["/bin/myencrypt", "healthcheck"]
+      interval: 30s
+      timeout: 10s
+      start_period: 5s
+      retries: 3
     restart: unless-stopped
 
   # Demo App 1: Autocert (direct HTTPS)
