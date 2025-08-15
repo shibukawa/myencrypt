@@ -13,7 +13,6 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"os"
 	"strings"
 	"sync"
 	"time"
@@ -54,20 +53,9 @@ type Server struct {
 
 // NewServer creates a new ACME server instance
 func NewServer(cfg *config.Config, certMgr certmanager.Manager, log *logger.Logger) *Server {
-	var baseURL string
-
-	// Hostname設定が明示的に指定されている場合はそれを使用
-	if cfg.Hostname != "" {
-		baseURL = fmt.Sprintf("http://%s:%d", cfg.Hostname, cfg.HTTPPort)
-	} else {
-		// Hostname設定がない場合は従来のロジックを使用
-		baseURL = fmt.Sprintf("http://%s:%d", cfg.BindAddress, cfg.HTTPPort)
-		if cfg.BindAddress == "0.0.0.0" {
-			// Docker環境では、デフォルトでlocalhostを使用
-			// （コンテナ間通信ではなく、外部からのアクセス用）
-			baseURL = fmt.Sprintf("http://localhost:%d", cfg.HTTPPort)
-		}
-	}
+	// Use centralized hostname resolution logic
+	hostname := cfg.GetHostnameForACME()
+	baseURL := fmt.Sprintf("http://%s:%d", hostname, cfg.HTTPPort)
 
 	// Initialize SQLite storage
 	var storage Storage
@@ -415,7 +403,7 @@ func (s *Server) validateHTTP01Challenge(challenge *ServerChallenge, authz *Serv
 	// Construct the validation URL
 	// In test environment, allow custom base URL for HTTP-01 challenges
 	var validationURL string
-	if testBaseURL := os.Getenv("MYENCRYPT_TEST_HTTP01_BASE_URL"); testBaseURL != "" {
+	if testBaseURL := config.GetTestHTTP01BaseURL(); testBaseURL != "" {
 		// Test environment: use custom base URL
 		validationURL = fmt.Sprintf("%s/.well-known/acme-challenge/%s", testBaseURL, token)
 	} else {

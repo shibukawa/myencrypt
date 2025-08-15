@@ -201,7 +201,7 @@ func (ca *CAManager) generateCACertificate() (*CACertificate, error) {
 	}
 
 	// Get project name for Docker mode
-	projectName := os.Getenv("MYENCRYPT_PROJECT_NAME")
+	projectName := config.GetProjectName()
 
 	// Get current time for CA creation timestamp
 	caCreatedAt := time.Now()

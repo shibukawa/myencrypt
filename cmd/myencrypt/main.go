@@ -338,7 +338,7 @@ func handleRunCommand(cfg *config.Config, log *logger.Logger, dryRun bool, conta
 		fmt.Println("============================")
 		fmt.Printf("HTTP Server: http://%s:%d\n", finalCfg.BindAddress, finalCfg.HTTPPort)
 		if containerMode {
-			exposePort := os.Getenv("MYENCRYPT_EXPOSE_PORT")
+			exposePort := config.GetExposePort()
 			fmt.Printf("Docker Expose Port: %s (host access)\n", exposePort)
 			fmt.Printf("Internal Port: %d (container internal)\n", finalCfg.HTTPPort)
 		}
@@ -386,7 +386,7 @@ func handleRunCommand(cfg *config.Config, log *logger.Logger, dryRun bool, conta
 	fmt.Printf("Starting MyEncrypt ACME Server...\n")
 	fmt.Printf("HTTP Server: http://%s:%d\n", finalCfg.BindAddress, finalCfg.HTTPPort)
 	if containerMode {
-		exposePort := os.Getenv("MYENCRYPT_EXPOSE_PORT")
+		exposePort := config.GetExposePort()
 		fmt.Printf("Docker Expose Port: %s (host access)\n", exposePort)
 		fmt.Printf("Internal Port: %d (container internal)\n", finalCfg.HTTPPort)
 		fmt.Printf("Container Access: http://myencrypt (within Docker network)\n")

@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -370,6 +371,150 @@ func (c *Config) validateCertStorePath() error {
 	os.Remove(testFile) // Clean up test file
 
 	return nil
+}
+
+// LoadFromEnvironment loads configuration from environment variables only
+// This is the centralized place for all environment variable processing
+func LoadFromEnvironment() *Config {
+	cfg := DefaultConfig()
+
+	// Server configuration
+	if port := os.Getenv("MYENCRYPT_HTTP_PORT"); port != "" {
+		if p, err := strconv.Atoi(port); err == nil {
+			cfg.HTTPPort = p
+		}
+	}
+
+	if addr := os.Getenv("MYENCRYPT_BIND_ADDRESS"); addr != "" {
+		cfg.BindAddress = addr
+	}
+
+	if hostname := os.Getenv("MYENCRYPT_HOSTNAME"); hostname != "" {
+		cfg.Hostname = hostname
+	}
+
+	// Certificate configuration
+	if ttl := os.Getenv("MYENCRYPT_INDIVIDUAL_CERT_TTL"); ttl != "" {
+		if duration, err := time.ParseDuration(ttl); err == nil {
+			cfg.IndividualCertTTL = duration
+		}
+	}
+
+	if ttl := os.Getenv("MYENCRYPT_CA_CERT_TTL"); ttl != "" {
+		if duration, err := time.ParseDuration(ttl); err == nil {
+			cfg.CACertTTL = duration
+		}
+	}
+
+	// Domain configuration
+	if domains := os.Getenv("MYENCRYPT_ALLOWED_DOMAINS"); domains != "" {
+		cfg.DefaultAllowedDomains = parseDomainsFromString(domains)
+		cfg.AdditionalDomains = []string{} // Clear additional domains when env is set
+	}
+
+	// Storage configuration
+	if path := os.Getenv("MYENCRYPT_CERT_STORE_PATH"); path != "" {
+		cfg.CertStorePath = path
+	}
+
+	if path := os.Getenv("MYENCRYPT_DATABASE_PATH"); path != "" {
+		cfg.DatabasePath = path
+	}
+
+	// Auto renewal configuration
+	if renewal := os.Getenv("MYENCRYPT_AUTO_RENEWAL"); renewal != "" {
+		if b, err := strconv.ParseBool(renewal); err == nil {
+			cfg.AutoRenewal = b
+		}
+	}
+
+	if interval := os.Getenv("MYENCRYPT_RENEWAL_INTERVAL"); interval != "" {
+		if duration, err := time.ParseDuration(interval); err == nil {
+			cfg.RenewalInterval = duration
+		}
+	}
+
+	// Service configuration
+	if mode := os.Getenv("MYENCRYPT_RUN_MODE"); mode != "" {
+		cfg.RunMode = mode
+	}
+
+	return cfg
+}
+
+// GetHostnameForACME returns the hostname to use for ACME directory endpoints
+// This implements the hostname resolution logic centrally
+func (c *Config) GetHostnameForACME() string {
+	// 1. 明示的なHostname設定が最優先
+	if c.Hostname != "" {
+		return c.Hostname
+	}
+
+	// 2. BindAddressが0.0.0.0の場合はlocalhost
+	if c.BindAddress == "0.0.0.0" {
+		return "localhost"
+	}
+
+	// 3. BindAddressをそのまま使用
+	return c.BindAddress
+}
+
+// parseDomainsFromString parses domains from a comma or newline separated string
+func parseDomainsFromString(domainsStr string) []string {
+	var domains []string
+
+	// Support both comma and newline separation
+	separators := []string{",", "\n", ";"}
+	lines := []string{domainsStr}
+
+	for _, sep := range separators {
+		var newLines []string
+		for _, line := range lines {
+			newLines = append(newLines, strings.Split(line, sep)...)
+		}
+		lines = newLines
+	}
+
+	for _, domain := range lines {
+		domain = strings.TrimSpace(domain)
+		if domain != "" && !strings.HasPrefix(domain, "#") {
+			domains = append(domains, domain)
+		}
+	}
+
+	return domains
+}
+
+// Environment variable access functions - centralized environment variable handling
+
+// GetExposePort returns the MYENCRYPT_EXPOSE_PORT environment variable
+func GetExposePort() string {
+	return os.Getenv("MYENCRYPT_EXPOSE_PORT")
+}
+
+// GetProjectName returns the MYENCRYPT_PROJECT_NAME environment variable
+func GetProjectName() string {
+	return os.Getenv("MYENCRYPT_PROJECT_NAME")
+}
+
+// GetLogLevel returns the MYENCRYPT_LOG_LEVEL environment variable
+func GetLogLevel() string {
+	return os.Getenv("MYENCRYPT_LOG_LEVEL")
+}
+
+// GetTestHTTP01BaseURL returns the MYENCRYPT_TEST_HTTP01_BASE_URL environment variable (for testing)
+func GetTestHTTP01BaseURL() string {
+	return os.Getenv("MYENCRYPT_TEST_HTTP01_BASE_URL")
+}
+
+// HasExposePort checks if MYENCRYPT_EXPOSE_PORT is set
+func HasExposePort() bool {
+	return GetExposePort() != ""
+}
+
+// HasProjectName checks if MYENCRYPT_PROJECT_NAME is set
+func HasProjectName() bool {
+	return GetProjectName() != ""
 }
 
 // CLIOverrides represents command-line overrides for configuration

@@ -80,7 +80,7 @@ func (cm *CertificateManager) GenerateCertificate(domain string) (*Certificate, 
 
 	// Extract CA creation time and project info
 	caCreatedAt := caCert.Certificate.NotBefore
-	projectName := os.Getenv("MYENCRYPT_PROJECT_NAME")
+	projectName := config.GetProjectName()
 
 	// Create certificate template
 	// Construct base URLs for CRL and OCSP
@@ -472,7 +472,7 @@ func (cm *CertificateManager) GenerateCertificateFromCSR(csr *x509.CertificateRe
 
 	// Extract CA creation time and project info
 	caCreatedAt := caCert.Certificate.NotBefore
-	projectName := os.Getenv("MYENCRYPT_PROJECT_NAME")
+	projectName := config.GetProjectName()
 
 	// Build organization unit with CA information
 	var orgUnit []string
