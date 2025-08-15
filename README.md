@@ -137,6 +137,8 @@ You can customize the `compose.yaml` file or use environment variables:
 
 ```bash
 # Custom configuration with environment variables
+MYENCRYPT_HOSTNAME=localhost \
+MYENCRYPT_PROJECT_NAME=myapp \
 MYENCRYPT_ALLOWED_DOMAINS="localhost,*.localhost,*.dev,*.local" \
 MYENCRYPT_LOG_LEVEL=debug \
 docker compose up -d
@@ -255,6 +257,8 @@ When running in Docker mode, MyEncrypt:
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `MYENCRYPT_EXPOSE_PORT` | - | **Required**: Host-accessible port number |
+| `MYENCRYPT_HOSTNAME` | `localhost` | Hostname for ACME directory endpoints (e.g., `localhost`, `myencrypt.local`) |
+| `MYENCRYPT_PROJECT_NAME` | - | Project identifier for certificate organization and naming |
 | `MYENCRYPT_ALLOWED_DOMAINS` | `localhost,*.localhost,*.test,*.example,*.invalid` | Comma-separated list of allowed domains |
 | `MYENCRYPT_INDIVIDUAL_CERT_TTL` | `168h` | Certificate validity period |
 | `MYENCRYPT_CA_CERT_TTL` | `19200h` | CA certificate validity period (800 days) |
@@ -290,6 +294,70 @@ docker run -p 14000:80 \
   -v myencrypt_data:/data \
   ghcr.io/shibukawa/myencrypt:latest
 ```
+
+#### Custom Hostname and Project Configuration
+```bash
+docker run -p 14000:80 \
+  -e MYENCRYPT_EXPOSE_PORT=14000 \
+  -e MYENCRYPT_HOSTNAME=myencrypt.local \
+  -e MYENCRYPT_PROJECT_NAME=myapp \
+  -e MYENCRYPT_ALLOWED_DOMAINS="localhost,*.localhost,*.myapp.local" \
+  -v myencrypt_data:/data \
+  ghcr.io/shibukawa/myencrypt:latest
+```
+
+### Configuration Details
+
+#### MYENCRYPT_HOSTNAME
+Controls the hostname used in ACME directory endpoints. This affects how ACME clients connect to MyEncrypt.
+
+**Default behavior:**
+- If not set: Uses `localhost` when `bind_address` is `0.0.0.0`, otherwise uses the `bind_address` value
+- If set: Uses the specified hostname regardless of `bind_address`
+
+**Examples:**
+```bash
+# For local development
+MYENCRYPT_HOSTNAME=localhost
+
+# For custom local domain
+MYENCRYPT_HOSTNAME=myencrypt.local
+
+# For Docker container networking
+MYENCRYPT_HOSTNAME=myencrypt
+```
+
+**ACME Directory Result:**
+```json
+{
+  "newNonce": "http://your-hostname:80/acme/new-nonce",
+  "newAccount": "http://your-hostname:80/acme/new-account",
+  "newOrder": "http://your-hostname:80/acme/new-order",
+  ...
+}
+```
+
+#### MYENCRYPT_PROJECT_NAME
+Provides a project identifier for certificate organization and naming. This helps distinguish certificates when running multiple MyEncrypt instances or projects.
+
+**Usage:**
+- Certificate file naming and organization
+- Project-specific certificate identification
+- Multi-project certificate management
+
+**Examples:**
+```bash
+# For a web application project
+MYENCRYPT_PROJECT_NAME=webapp
+
+# For a microservices project
+MYENCRYPT_PROJECT_NAME=microservices
+
+# For development environment
+MYENCRYPT_PROJECT_NAME=dev-env
+```
+
+**Note:** `MYENCRYPT_PROJECT_NAME` is separate from `MYENCRYPT_HOSTNAME`. The hostname controls ACME endpoint URLs, while the project name is used for certificate organization.
 
 ## Service Communication Architecture
 
