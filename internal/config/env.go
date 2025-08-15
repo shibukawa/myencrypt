@@ -5,7 +5,6 @@ import (
 	"os"
 	"regexp"
 	"strconv"
-	"strings"
 	"time"
 )
 
@@ -22,6 +21,10 @@ func LoadFromEnv() *Config {
 
 	if addr := os.Getenv("MYENCRYPT_BIND_ADDRESS"); addr != "" {
 		cfg.BindAddress = addr
+	}
+
+	if hostname := os.Getenv("MYENCRYPT_HOSTNAME"); hostname != "" {
+		cfg.Hostname = hostname
 	}
 
 	// Certificate configuration
@@ -84,6 +87,11 @@ func LoadFromEnvForDocker() (*Config, error) {
 	// Set internal port to 80 for Docker mode
 	cfg.HTTPPort = 80
 	cfg.BindAddress = "0.0.0.0"
+
+	// Override hostname if specified
+	if hostname := os.Getenv("MYENCRYPT_HOSTNAME"); hostname != "" {
+		cfg.Hostname = hostname
+	}
 
 	// Enable auto-initialization in Docker mode
 	cfg.AutoInit = true
@@ -149,30 +157,6 @@ func isValidProjectName(name string) bool {
 }
 
 // parseDomainsFromString parses domains from a comma or newline separated string
-func parseDomainsFromString(domainsStr string) []string {
-	var domains []string
-
-	// Support both comma and newline separation
-	separators := []string{",", "\n", ";"}
-	lines := []string{domainsStr}
-
-	for _, sep := range separators {
-		var newLines []string
-		for _, line := range lines {
-			newLines = append(newLines, strings.Split(line, sep)...)
-		}
-		lines = newLines
-	}
-
-	for _, domain := range lines {
-		domain = strings.TrimSpace(domain)
-		if domain != "" && !strings.HasPrefix(domain, "#") {
-			domains = append(domains, domain)
-		}
-	}
-
-	return domains
-}
 
 // GetEnvWithDefault returns environment variable value or default
 func GetEnvWithDefault(key, defaultValue string) string {
@@ -233,6 +217,10 @@ func LoadWithEnvOverrides() (*Config, error) {
 		cfg.BindAddress = envCfg.BindAddress
 	}
 
+	if envCfg.Hostname != cfg.Hostname && envCfg.Hostname != DefaultConfig().Hostname {
+		cfg.Hostname = envCfg.Hostname
+	}
+
 	if envCfg.IndividualCertTTL != cfg.IndividualCertTTL && envCfg.IndividualCertTTL != DefaultConfig().IndividualCertTTL {
 		cfg.IndividualCertTTL = envCfg.IndividualCertTTL
 	}
@@ -281,6 +269,7 @@ func PrintEnvHelp() {
 	}{
 		{"MYENCRYPT_HTTP_PORT", "HTTP server port", "14000", "14000"},
 		{"MYENCRYPT_BIND_ADDRESS", "Bind address", "0.0.0.0", "0.0.0.0"},
+		{"MYENCRYPT_HOSTNAME", "Hostname for ACME directory endpoints", "", "localhost"},
 		{"MYENCRYPT_INDIVIDUAL_CERT_TTL", "Individual certificate TTL", "168h", "168h"},
 		{"MYENCRYPT_CA_CERT_TTL", "CA certificate TTL", "800 days", "19200h"},
 		{"MYENCRYPT_ALLOWED_DOMAINS", "Allowed domains (comma/newline separated)", "localhost,*.localhost,*.test,*.example,*.invalid", "localhost,*.localhost,example.com,*.example.com"},

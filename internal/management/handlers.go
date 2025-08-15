@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -266,7 +265,7 @@ func (s *Server) serveDownloadInterface(w http.ResponseWriter, r *http.Request) 
 	isWindows := strings.Contains(strings.ToLower(userAgent), "windows")
 
 	// Detect Docker environment and get exposed port
-	exposePort := os.Getenv("MYENCRYPT_EXPOSE_PORT")
+	exposePort := config.GetExposePort()
 	var scriptPort int
 	if exposePort != "" {
 		// Docker mode: use exposed port for scripts
@@ -633,8 +632,8 @@ func (s *Server) handleDownloadInstallSh(w http.ResponseWriter, r *http.Request)
 	s.logger.Debug("Install script download requested", "remote_addr", r.RemoteAddr)
 
 	// Detect Docker environment and get exposed port
-	exposePort := os.Getenv("MYENCRYPT_EXPOSE_PORT")
-	projectName := os.Getenv("MYENCRYPT_PROJECT_NAME")
+	exposePort := config.GetExposePort()
+	projectName := config.GetProjectName()
 	var scriptPort int
 	if exposePort != "" {
 		// Docker mode: use exposed port for scripts
@@ -839,7 +838,7 @@ func (s *Server) handleDownloadInstallPs1(w http.ResponseWriter, r *http.Request
 	s.logger.Debug("PowerShell install script download requested", "remote_addr", r.RemoteAddr)
 
 	// Detect Docker environment and get exposed port
-	exposePort := os.Getenv("MYENCRYPT_EXPOSE_PORT")
+	exposePort := config.GetExposePort()
 	var scriptPort int
 	if exposePort != "" {
 		// Docker mode: use exposed port for scripts
@@ -932,8 +931,8 @@ func (s *Server) handleDownloadUninstallSh(w http.ResponseWriter, r *http.Reques
 	s.logger.Debug("Uninstall script download requested", "remote_addr", r.RemoteAddr)
 
 	// Detect Docker environment and get exposed port
-	exposePort := os.Getenv("MYENCRYPT_EXPOSE_PORT")
-	projectName := os.Getenv("MYENCRYPT_PROJECT_NAME")
+	exposePort := config.GetExposePort()
+	projectName := config.GetProjectName()
 	var scriptPort int
 	if exposePort != "" {
 		// Docker mode: use exposed port for scripts
@@ -1076,8 +1075,8 @@ func (s *Server) handleDownloadUninstallPs1(w http.ResponseWriter, r *http.Reque
 	s.logger.Debug("PowerShell uninstall script download requested", "remote_addr", r.RemoteAddr)
 
 	// Detect Docker environment and get exposed port
-	exposePort := os.Getenv("MYENCRYPT_EXPOSE_PORT")
-	projectName := os.Getenv("MYENCRYPT_PROJECT_NAME")
+	exposePort := config.GetExposePort()
+	projectName := config.GetProjectName()
 	var scriptPort int
 	if exposePort != "" {
 		// Docker mode: use exposed port for scripts
@@ -1142,7 +1141,7 @@ func (s *Server) handleDownloadUninstallAllSh(w http.ResponseWriter, r *http.Req
 	s.logger.Debug("Uninstall-all script download requested", "remote_addr", r.RemoteAddr)
 
 	// Detect Docker environment and get exposed port
-	exposePort := os.Getenv("MYENCRYPT_EXPOSE_PORT")
+	exposePort := config.GetExposePort()
 	var scriptPort int
 	if exposePort != "" {
 		// Docker mode: use exposed port for scripts
@@ -1206,7 +1205,7 @@ func (s *Server) handleDownloadUninstallAllPs1(w http.ResponseWriter, r *http.Re
 	s.logger.Debug("PowerShell uninstall-all script download requested", "remote_addr", r.RemoteAddr)
 
 	// Detect Docker environment and get exposed port
-	exposePort := os.Getenv("MYENCRYPT_EXPOSE_PORT")
+	exposePort := config.GetExposePort()
 	var scriptPort int
 	if exposePort != "" {
 		// Docker mode: use exposed port for scripts
@@ -1783,7 +1782,7 @@ func (s *Server) getCAInfo() (*CAInfo, error) {
 	}
 
 	// Extract project name from environment
-	projectName := os.Getenv("MYENCRYPT_PROJECT_NAME")
+	projectName := config.GetProjectName()
 	if projectName == "" {
 		projectName = "default"
 	}
