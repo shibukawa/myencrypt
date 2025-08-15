@@ -44,6 +44,7 @@ type CLI struct {
 	ConfigFile    string `help:"Path to configuration file" default:"" env:"MYENCRYPT_CONFIG" group:"config"`
 	HTTPPort      int    `help:"HTTP server port" default:"14000" env:"MYENCRYPT_HTTP_PORT" group:"server" range:"1-65535"`
 	BindAddress   string `help:"Server bind address" default:"0.0.0.0" env:"MYENCRYPT_BIND_ADDRESS" group:"server"`
+	Hostname      string `help:"Hostname for ACME directory endpoints" default:"" env:"MYENCRYPT_HOSTNAME" group:"server"`
 	CertStorePath string `help:"Certificate storage path" default:"" env:"MYENCRYPT_CERT_STORE_PATH" group:"storage"`
 	DatabasePath  string `help:"SQLite database file path" default:"" env:"MYENCRYPT_DATABASE_PATH" group:"storage"`
 	LogLevel      string `help:"Log level (debug, info, error)" default:"info" enum:"debug,info,error" env:"MYENCRYPT_LOG_LEVEL" group:"logging"`
@@ -177,6 +178,7 @@ func main() {
 	overrides := config.CLIOverrides{
 		ConfigFile:        cli.ConfigFile,
 		BindAddress:       cli.BindAddress,
+		Hostname:          cli.Hostname,
 		CertStorePath:     cli.CertStorePath,
 		DatabasePath:      cli.DatabasePath,
 		LogLevel:          cli.LogLevel,
@@ -525,6 +527,11 @@ func handleConfigShowCommand(cfg *config.Config, log *logger.Logger) error {
 	fmt.Println("Server Settings:")
 	fmt.Printf("  HTTP Port: %d\n", cfg.HTTPPort)
 	fmt.Printf("  Bind Address: %s\n", cfg.BindAddress)
+	if cfg.Hostname != "" {
+		fmt.Printf("  Hostname: %s\n", cfg.Hostname)
+	} else {
+		fmt.Printf("  Hostname: (auto-detected)\n")
+	}
 	fmt.Println()
 
 	fmt.Println("Certificate Settings:")

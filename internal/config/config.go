@@ -33,6 +33,7 @@ type Config struct {
 	// Server configuration
 	HTTPPort    int    `yaml:"http_port"`
 	BindAddress string `yaml:"bind_address"`
+	Hostname    string `yaml:"hostname"` // ACME directory endpointで使用するホスト名
 
 	// Certificate configuration
 	IndividualCertTTL time.Duration `yaml:"individual_cert_ttl"`
@@ -76,6 +77,7 @@ func DefaultConfig() *Config {
 		// Server defaults
 		HTTPPort:    14000,
 		BindAddress: "0.0.0.0",
+		Hostname:    "", // 空の場合は自動検出
 
 		// Certificate defaults
 		IndividualCertTTL: 7 * 24 * time.Hour,   // 7 days
@@ -375,6 +377,7 @@ type CLIOverrides struct {
 	ConfigFile        string
 	HTTPPort          *int
 	BindAddress       string
+	Hostname          string
 	CertStorePath     string
 	DatabasePath      string
 	LogLevel          string
@@ -392,6 +395,9 @@ func (c *Config) ApplyOverrides(overrides CLIOverrides) error {
 	}
 	if overrides.BindAddress != "" {
 		c.BindAddress = overrides.BindAddress
+	}
+	if overrides.Hostname != "" {
+		c.Hostname = overrides.Hostname
 	}
 	if overrides.CertStorePath != "" {
 		// Handle tilde expansion

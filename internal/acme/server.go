@@ -54,15 +54,18 @@ type Server struct {
 
 // NewServer creates a new ACME server instance
 func NewServer(cfg *config.Config, certMgr certmanager.Manager, log *logger.Logger) *Server {
-	baseURL := fmt.Sprintf("http://%s:%d", cfg.BindAddress, cfg.HTTPPort)
-	if cfg.BindAddress == "0.0.0.0" {
-		// In Docker environment, use container name for inter-container communication
-		if projectName := os.Getenv("MYENCRYPT_PROJECT_NAME"); projectName != "" {
-			// Use the project name as hostname for Docker networking
-			baseURL = fmt.Sprintf("http://%s:%d", projectName, cfg.HTTPPort)
-		} else {
-			// Default to 'myencrypt' for Docker Compose networking
-			baseURL = fmt.Sprintf("http://myencrypt:%d", cfg.HTTPPort)
+	var baseURL string
+
+	// Hostname設定が明示的に指定されている場合はそれを使用
+	if cfg.Hostname != "" {
+		baseURL = fmt.Sprintf("http://%s:%d", cfg.Hostname, cfg.HTTPPort)
+	} else {
+		// Hostname設定がない場合は従来のロジックを使用
+		baseURL = fmt.Sprintf("http://%s:%d", cfg.BindAddress, cfg.HTTPPort)
+		if cfg.BindAddress == "0.0.0.0" {
+			// Docker環境では、デフォルトでlocalhostを使用
+			// （コンテナ間通信ではなく、外部からのアクセス用）
+			baseURL = fmt.Sprintf("http://localhost:%d", cfg.HTTPPort)
 		}
 	}
 
