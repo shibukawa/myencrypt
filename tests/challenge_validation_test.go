@@ -40,6 +40,7 @@ func TestChallengeValidationFlow(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Order creation failed: %v", err)
 		}
+		orderURL := order.URI
 		t.Logf("✅ Order created: %s", order.URI)
 
 		// Get authorization
@@ -91,9 +92,6 @@ func TestChallengeValidationFlow(t *testing.T) {
 			if challenge.Status == acme.StatusValid {
 				t.Log("🎉 Challenge validation succeeded!")
 				break
-			} else if challenge.Status == acme.StatusInvalid {
-				t.Logf("⚠️  Challenge validation failed (expected): %v", challenge.Error)
-				break
 			}
 
 			time.Sleep(200 * time.Millisecond) // Reduced from 2s to 200ms
@@ -104,17 +102,10 @@ func TestChallengeValidationFlow(t *testing.T) {
 			t.Fatal("Failed to get final challenge status")
 		}
 
-		// For this test, we expect validation to fail since we're not serving the challenge response
-		if finalChallenge.Status == acme.StatusInvalid {
-			t.Log("✅ Challenge validation failed as expected (no HTTP server)")
-			if finalChallenge.Error != nil {
-				t.Logf("📋 Error details: %v", finalChallenge.Error)
-			}
-		} else if finalChallenge.Status == acme.StatusValid {
-			t.Log("🎉 Challenge validation unexpectedly succeeded")
-		} else {
-			t.Logf("📊 Final challenge status: %s", finalChallenge.Status)
+		if finalChallenge.Status != acme.StatusValid {
+			t.Fatalf("Challenge status = %s, want %s", finalChallenge.Status, acme.StatusValid)
 		}
+		t.Log("✅ Challenge validation is always skipped and returns valid")
 
 		// Check authorization status
 		authz, err = client.client.GetAuthorization(ctx, order.AuthzURLs[0])
@@ -124,7 +115,7 @@ func TestChallengeValidationFlow(t *testing.T) {
 		t.Logf("📊 Final authorization status: %s", authz.Status)
 
 		// Check order status
-		order, err = client.client.GetOrder(ctx, order.URI)
+		order, err = client.client.GetOrder(ctx, orderURL)
 		if err != nil {
 			t.Fatalf("Failed to get final order: %v", err)
 		}
@@ -206,12 +197,10 @@ func TestChallengeValidationComponents(t *testing.T) {
 
 		t.Logf("📊 Challenge status after accept: %s", updatedChallenge.Status)
 
-		// The challenge should have been processed (either valid or invalid)
-		if updatedChallenge.Status == acme.StatusPending {
-			t.Error("Challenge is still pending after accept")
-		} else {
-			t.Logf("✅ Challenge was processed: %s", updatedChallenge.Status)
+		if updatedChallenge.Status != acme.StatusValid {
+			t.Fatalf("Challenge status = %s, want %s", updatedChallenge.Status, acme.StatusValid)
 		}
+		t.Logf("✅ Challenge was processed as valid: %s", updatedChallenge.Status)
 	})
 
 	t.Run("DatabasePersistence", func(t *testing.T) {
@@ -241,4 +230,88 @@ func TestChallengeValidationComponents(t *testing.T) {
 
 		t.Log("✅ All ACME objects persisted to database")
 	})
+}
+
+func TestChallengeValidationIsAlwaysSkipped(t *testing.T) {
+	server := NewTestServer(t, 14035)
+	defer server.Stop()
+
+	server.Start(t)
+
+	client, err := NewACMEClient(server.Config.HTTPPort)
+	if err != nil {
+		t.Fatalf("Failed to create ACME client: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	_, err = client.RegisterAccount(ctx)
+	if err != nil {
+		t.Fatalf("Account registration failed: %v", err)
+	}
+
+	order, err := client.CreateOrder(ctx, []string{"test.localhost"})
+	if err != nil {
+		t.Fatalf("Order creation failed: %v", err)
+	}
+	orderURL := order.URI
+
+	authz, err := client.client.GetAuthorization(ctx, order.AuthzURLs[0])
+	if err != nil {
+		t.Fatalf("Failed to get authorization: %v", err)
+	}
+
+	var httpChallenge *acme.Challenge
+	for _, challenge := range authz.Challenges {
+		if challenge.Type == "http-01" {
+			httpChallenge = challenge
+			break
+		}
+	}
+
+	if httpChallenge == nil {
+		t.Fatal("No HTTP-01 challenge found")
+	}
+
+	_, err = client.client.Accept(ctx, httpChallenge)
+	if err != nil {
+		t.Fatalf("Failed to accept challenge: %v", err)
+	}
+
+	var finalChallenge *acme.Challenge
+	for i := 0; i < 10; i++ {
+		finalChallenge, err = client.client.GetChallenge(ctx, httpChallenge.URI)
+		if err == nil && finalChallenge.Status == acme.StatusValid {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	if finalChallenge == nil {
+		t.Fatal("Failed to get final challenge status")
+	}
+	if finalChallenge.Status != acme.StatusValid {
+		t.Fatalf("Challenge status = %s, want %s", finalChallenge.Status, acme.StatusValid)
+	}
+
+	authz, err = client.client.GetAuthorization(ctx, order.AuthzURLs[0])
+	if err != nil {
+		t.Fatalf("Failed to get final authorization: %v", err)
+	}
+	if authz.Status != acme.StatusValid {
+		t.Fatalf("Authorization status = %s, want %s", authz.Status, acme.StatusValid)
+	}
+
+	for i := 0; i < 10; i++ {
+		order, err = client.client.GetOrder(ctx, orderURL)
+		if err == nil && order.Status == acme.StatusReady {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	if order.Status != acme.StatusReady {
+		t.Fatalf("Order status = %s, want %s", order.Status, acme.StatusReady)
+	}
 }

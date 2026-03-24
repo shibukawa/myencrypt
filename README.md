@@ -107,6 +107,10 @@ MyEncrypt uses a YAML configuration file located at `~/.myencrypt/config.yaml`. 
 - CA Certificate TTL: 800 days
 - Default Allowed Domains: localhost, *.localhost, *.test, *.example, *.invalid
 
+MyEncrypt always skips challenge verification. As soon as the ACME client accepts a challenge, MyEncrypt marks it as `valid` immediately.
+
+This behavior is intentionally fixed for local development use. HTTP-01, TLS-ALPN-01, and DNS-01 are not verified over the network.
+
 ## Installation and Running
 
 ### Using Docker Compose (Recommended)
