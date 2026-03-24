@@ -2,6 +2,8 @@
 
 MyEncryptは、開発環境向けの自動HTTPS証明書管理を提供するローカル開発用ACME認証局です。
 
+AI向けのリポジトリ要約は[llms.txt](llms.txt)を参照してください。
+
 ## なぜMyEncryptが必要なのか？
 
 Google Chrome、Firefox、Safariなどの現代的なWebブラウザは、`*.localhost`ドメインを内蔵でサポートし、HTTPS証明書を必要とせずにセキュアコンテキストとして扱います。しかし、開発者がローカル開発で実際のHTTPS証明書が必要な場合（SSL/TLS機能のテスト、Service Workerの動作、開発環境と本番環境の一致など）、これらのドメインに対して有効な証明書を取得する簡単な方法がありませんでした。

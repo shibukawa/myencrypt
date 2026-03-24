@@ -1,0 +1,221 @@
+# MyEncrypt
+
+AI-facing summary for this repository.
+
+## What This Project Is
+
+MyEncrypt is a local-development ACME certificate authority written in Go.
+
+It is designed to let ACME clients such as Certbot, Traefik, and Go autocert obtain short-lived certificates for local domains without using a public CA.
+
+This project is for local and trusted development environments, not for public Internet certificate issuance.
+
+## Key Behavior
+
+- ACME challenge validation is intentionally skipped.
+- When an ACME client accepts a challenge, MyEncrypt marks it valid immediately.
+- Supported development domains are restricted by policy and configuration.
+- Default built-in domains are:
+  - localhost
+  - *.localhost
+  - *.test
+  - *.example
+  - *.invalid
+
+## Important Source Files
+
+- README.md: primary English usage and architecture guide.
+- README.ja.md: Japanese usage guide.
+- cmd/myencrypt/main.go: CLI entry point and command definitions.
+- internal/config/config.go: config file schema and defaults.
+- internal/config/env.go: environment variable handling, including Docker mode rules.
+- internal/acme/: ACME server implementation.
+- compose.yaml: full demo stack with MyEncrypt plus example integrations.
+- Dockerfile: container build and runtime definition.
+- docs/database-schema.sql: SQLite schema.
+- docs/protocol-support.md: protocol support summary.
+
+## Configuration File
+
+Primary config file location:
+
+- ~/.myencrypt/config.yaml
+
+If the file does not exist, defaults are used.
+
+Important config keys:
+
+- http_port: HTTP port for the server in normal mode. Default: 14000.
+- bind_address: bind address. Default: 0.0.0.0.
+- hostname: optional hostname used for ACME directory URLs.
+- individual_cert_ttl: leaf certificate lifetime. Default: 168h.
+- ca_cert_ttl: CA certificate lifetime. Default: 19200h.
+- default_allowed_domains: built-in allowed domains list.
+- additional_domains: extra allowed domains.
+- cert_store_path: certificate/config storage directory.
+- database_path: SQLite database path.
+- service_name: OS service name.
+- service_display_name: human-readable service name.
+- service_description: service description.
+- run_mode: service, docker, or standalone.
+- auto_renewal: whether automatic renewal checks run.
+- renewal_interval: renewal polling interval.
+
+Minimal example:
+
+```yaml
+http_port: 14000
+bind_address: 0.0.0.0
+hostname: localhost
+individual_cert_ttl: 168h
+ca_cert_ttl: 19200h
+cert_store_path: ~/.myencrypt
+database_path: ~/.myencrypt/myencrypt.db
+run_mode: service
+auto_renewal: true
+renewal_interval: 1h
+default_allowed_domains:
+  - localhost
+  - '*.localhost'
+  - '*.test'
+  - '*.example'
+  - '*.invalid'
+additional_domains: []
+```
+
+## Environment Variables
+
+General environment variables:
+
+- MYENCRYPT_HTTP_PORT
+- MYENCRYPT_BIND_ADDRESS
+- MYENCRYPT_HOSTNAME
+- MYENCRYPT_INDIVIDUAL_CERT_TTL
+- MYENCRYPT_CA_CERT_TTL
+- MYENCRYPT_ALLOWED_DOMAINS
+- MYENCRYPT_CERT_STORE_PATH
+- MYENCRYPT_DATABASE_PATH
+- MYENCRYPT_AUTO_RENEWAL
+- MYENCRYPT_RENEWAL_INTERVAL
+- MYENCRYPT_RUN_MODE
+- MYENCRYPT_LOG_LEVEL
+
+Docker-mode required variables:
+
+- MYENCRYPT_EXPOSE_PORT: required. Host-accessible port.
+- MYENCRYPT_PROJECT_NAME: required. Must be alphanumeric, hyphen, or underscore.
+
+Docker-mode behavior:
+
+- Internal HTTP port is forced to 80.
+- bind_address is forced to 0.0.0.0.
+- AutoInit is enabled.
+- Persistent data is typically mounted at /data.
+
+## CLI Overview
+
+Main command:
+
+- myencrypt
+
+Main subcommands:
+
+- myencrypt init
+  - Initializes the CA and generates installation scripts.
+- myencrypt run
+  - Runs the server.
+- myencrypt test <domain>
+  - Development-time certificate generation test.
+- myencrypt service install|uninstall|start|stop|restart|status|run
+  - OS service management.
+- myencrypt domain add <domain>
+  - Adds a domain to allowed domains.
+- myencrypt domain remove <domain>
+  - Removes a domain from allowed domains.
+- myencrypt domain list
+  - Lists allowed domains.
+- myencrypt config show|validate|help
+  - Config inspection and help.
+- myencrypt version
+  - Shows version.
+- myencrypt healthcheck
+  - Used by Docker health checks.
+
+## Docker Build and Runtime
+
+The Dockerfile uses a multi-stage Go build and a distroless runtime image.
+
+Build/runtime notes:
+
+- Build stage uses Go and cross-compilers for amd64 and arm64.
+- Runtime image is gcr.io/distroless/base-debian12.
+- Final binary path is /bin/myencrypt.
+- Container exposes port 80.
+- Default container command is: /bin/myencrypt run
+- Healthcheck command is: /bin/myencrypt healthcheck
+
+Default container environment in Dockerfile includes:
+
+- MYENCRYPT_EXPOSE_PORT=14000
+- MYENCRYPT_PROJECT_NAME=myencrypt
+- MYENCRYPT_INDIVIDUAL_CERT_TTL=168h
+- MYENCRYPT_CA_CERT_TTL=19200h
+- MYENCRYPT_ALLOWED_DOMAINS=localhost,*.localhost,*.test,*.example,*.invalid,app.localhost
+- MYENCRYPT_CERT_STORE_PATH=/data
+- MYENCRYPT_DATABASE_PATH=/data/myencrypt.db
+- MYENCRYPT_LOG_LEVEL=info
+
+## Docker Compose Structure
+
+compose.yaml defines a demo stack with these services:
+
+- myencrypt
+  - Main ACME server.
+  - Host port 14000 mapped to container port 80.
+  - Persistent volume: myencrypt_data mounted to /data.
+- autocert.localhost
+  - Example Go autocert app.
+  - Uses ACME_DIRECTORY_URL=http://myencrypt:80/acme/directory.
+- simple-http-app
+  - Shared backend app for reverse-proxy examples.
+- traefik.localhost
+  - Example Traefik integration.
+  - Uses Docker socket and Traefik config files.
+- app-certbot.localhost
+  - Example Certbot + Nginx integration.
+
+Compose network:
+
+- Custom default network name: myencrypt2_default
+
+Compose volume:
+
+- myencrypt_data: persists CA material and SQLite database for MyEncrypt.
+
+## Development and Integration Notes
+
+- ACME clients should use the local directory endpoint exposed by MyEncrypt.
+- In Compose, the internal ACME directory URL is usually http://myencrypt:80/acme/directory.
+- On the host, the management and ACME interface is usually http://localhost:14000.
+- The system is intended to mimic ACME workflows, but without real network proof of domain control.
+
+## Constraints and Assumptions
+
+- Local development only.
+- Challenge verification is not performed over the network.
+- Public-CA security assumptions do not apply.
+- Domain issuance is intentionally restricted.
+- Storage backend is SQLite plus on-disk CA/cert material.
+
+## Where To Look Next
+
+For detailed usage:
+
+- README.md
+- README.ja.md
+
+For protocol and implementation details:
+
+- docs/protocol-support.md
+- docs/autocert-compatibility.md
+- docs/database-schema.sql

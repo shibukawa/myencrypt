@@ -2,6 +2,8 @@
 
 MyEncrypt is a local development ACME certificate authority that provides automatic HTTPS certificate management for development environments.
 
+For AI-oriented repository context, see [llms.txt](llms.txt).
+
 ## Why MyEncrypt?
 
 Modern web browsers like Google Chrome, Firefox, and Safari have built-in support for `*.localhost` domains, treating them as secure contexts without requiring HTTPS certificates. However, when developers need actual HTTPS certificates for local development - whether for testing SSL/TLS functionality, working with service workers, or ensuring development environments match production - there was no easy way to obtain valid certificates for these domains.
