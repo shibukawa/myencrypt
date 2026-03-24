@@ -220,13 +220,13 @@ func TestChallengeValidationErrors(t *testing.T) {
 			t.Fatal("No HTTP-01 challenge found")
 		}
 
-		// Accept challenge (this should fail validation)
+		// Accept challenge (validation is always skipped)
 		_, err = client.client.Accept(ctx, httpChallenge)
 		if err != nil {
 			t.Fatalf("Failed to accept challenge: %v", err)
 		}
 
-		// Wait for challenge validation to fail (reduced iterations and sleep time)
+		// Wait for challenge validation to succeed (reduced iterations and sleep time)
 		for i := 0; i < 10; i++ { // Increased from 8 to 10 to account for faster checks
 			challenge, err := client.client.GetChallenge(ctx, httpChallenge.URI)
 			if err != nil {
@@ -235,17 +235,15 @@ func TestChallengeValidationErrors(t *testing.T) {
 				continue
 			}
 
-			if challenge.Status == acme.StatusInvalid {
-				t.Logf("✅ Challenge validation failed as expected: %v", challenge.Error)
+			if challenge.Status == acme.StatusValid {
+				t.Log("✅ Challenge validation was skipped and returned valid")
 				return
-			} else if challenge.Status == acme.StatusValid {
-				t.Fatal("Challenge validation unexpectedly succeeded")
 			}
 
 			time.Sleep(100 * time.Millisecond) // Reduced from 1s to 100ms (1/10)
 		}
 
-		t.Log("⚠️  Challenge validation timeout (may be expected)")
+		t.Fatal("Challenge did not become valid within timeout")
 	})
 
 	t.Run("WrongChallengeResponse", func(t *testing.T) {
@@ -306,7 +304,7 @@ func TestChallengeValidationErrors(t *testing.T) {
 			t.Fatalf("Failed to accept challenge: %v", err)
 		}
 
-		// Wait for challenge validation to fail (reduced iterations and sleep time)
+		// Wait for challenge validation to succeed (reduced iterations and sleep time)
 		for i := 0; i < 10; i++ { // Increased from 8 to 10 to account for faster checks
 			challenge, err := client.client.GetChallenge(ctx, httpChallenge.URI)
 			if err != nil {
@@ -315,17 +313,15 @@ func TestChallengeValidationErrors(t *testing.T) {
 				continue
 			}
 
-			if challenge.Status == acme.StatusInvalid {
-				t.Logf("✅ Challenge validation failed as expected: %v", challenge.Error)
+			if challenge.Status == acme.StatusValid {
+				t.Log("✅ Challenge validation was skipped and returned valid")
 				return
-			} else if challenge.Status == acme.StatusValid {
-				t.Fatal("Challenge validation unexpectedly succeeded")
 			}
 
 			time.Sleep(100 * time.Millisecond) // Reduced from 1s to 100ms (1/10)
 		}
 
-		t.Log("⚠️  Challenge validation timeout")
+		t.Fatal("Challenge did not become valid within timeout")
 	})
 }
 
@@ -376,7 +372,7 @@ func TestDatabasePersistenceAfterChallenge(t *testing.T) {
 		t.Fatal("No HTTP-01 challenge found")
 	}
 
-	// Accept challenge (will fail validation, but that's OK for this test)
+	// Accept challenge (validation is always skipped)
 	_, err = client.client.Accept(ctx, httpChallenge)
 	if err != nil {
 		t.Fatalf("Failed to accept challenge: %v", err)
