@@ -55,6 +55,7 @@ func TestHTTP01Challenge(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Order creation failed: %v", err)
 		}
+		orderURL := order.URI
 		t.Logf("✅ Order created: %s", order.URI)
 
 		// Get authorization
@@ -157,7 +158,7 @@ func TestHTTP01Challenge(t *testing.T) {
 		}
 
 		// Check order status
-		order, err = client.client.GetOrder(ctx, order.URI)
+		order, err = client.client.GetOrder(ctx, orderURL)
 		if err != nil {
 			t.Fatalf("Failed to get final order: %v", err)
 		}

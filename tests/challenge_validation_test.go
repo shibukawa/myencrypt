@@ -40,6 +40,7 @@ func TestChallengeValidationFlow(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Order creation failed: %v", err)
 		}
+		orderURL := order.URI
 		t.Logf("✅ Order created: %s", order.URI)
 
 		// Get authorization
@@ -114,7 +115,7 @@ func TestChallengeValidationFlow(t *testing.T) {
 		t.Logf("📊 Final authorization status: %s", authz.Status)
 
 		// Check order status
-		order, err = client.client.GetOrder(ctx, order.URI)
+		order, err = client.client.GetOrder(ctx, orderURL)
 		if err != nil {
 			t.Fatalf("Failed to get final order: %v", err)
 		}
@@ -254,6 +255,7 @@ func TestChallengeValidationIsAlwaysSkipped(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Order creation failed: %v", err)
 	}
+	orderURL := order.URI
 
 	authz, err := client.client.GetAuthorization(ctx, order.AuthzURLs[0])
 	if err != nil {
@@ -302,7 +304,7 @@ func TestChallengeValidationIsAlwaysSkipped(t *testing.T) {
 	}
 
 	for i := 0; i < 10; i++ {
-		order, err = client.client.GetOrder(ctx, order.URI)
+		order, err = client.client.GetOrder(ctx, orderURL)
 		if err == nil && order.Status == acme.StatusReady {
 			break
 		}

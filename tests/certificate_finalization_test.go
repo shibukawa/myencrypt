@@ -44,6 +44,7 @@ func TestCertificateFinalization(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Order creation failed: %v", err)
 		}
+		orderURL := order.URI
 		t.Logf("✅ Order created: %s", order.URI)
 		t.Logf("📋 Order status: %s", order.Status)
 
@@ -103,7 +104,7 @@ func TestCertificateFinalization(t *testing.T) {
 		t.Logf("📊 Authorization status: %s", authz.Status)
 
 		// Check order status
-		order, err = client.client.GetOrder(ctx, order.URI)
+		order, err = client.client.GetOrder(ctx, orderURL)
 		if err != nil {
 			t.Fatalf("Failed to get order status: %v", err)
 		}
@@ -112,7 +113,7 @@ func TestCertificateFinalization(t *testing.T) {
 		// If order is not ready, we can't finalize
 		if order.Status != acme.StatusReady {
 			t.Logf("⚠️  Order is not ready for finalization (status: %s)", order.Status)
-			t.Log("This is expected since challenge validation failed")
+			t.Log("This is unexpected with always-valid challenges")
 			return
 		}
 
@@ -144,7 +145,7 @@ func TestCertificateFinalization(t *testing.T) {
 
 		// Wait for certificate to be issued
 		for i := 0; i < 10; i++ {
-			order, err = client.client.GetOrder(ctx, order.URI)
+			order, err = client.client.GetOrder(ctx, orderURL)
 			if err != nil {
 				t.Fatalf("Failed to get order status: %v", err)
 			}
